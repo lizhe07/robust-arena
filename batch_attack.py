@@ -35,7 +35,7 @@ if __name__=='__main__':
     search_spec = {
         'model_pth': [os.path.join(args.models_dir, 'exported', f'{model_id}.pt') \
                       for model_id in catalog[args.group_key]],
-        'norm': ['L2', 'Linf'],
+        'norm': ['Linf'],
         }
 
     attack_job.random_search(search_spec, args.process_num, args.tolerance)
