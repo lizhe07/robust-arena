@@ -6,6 +6,7 @@ Created on Thu Jul 30 15:29:37 2020
 """
 
 import os, argparse, time, torch, torchvision
+import numpy as np
 import eagerpy as ep
 import foolbox as fb
 from foolbox import PyTorchModel
@@ -14,6 +15,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from torchvision import transforms
 
 from jarvis import BaseJob
+from jarvis.vision import prepare_datasets, evaluate
 from jarvis.utils import time_str
 
 DEVICE = 'cuda'
@@ -81,6 +83,64 @@ class AttackJob(BaseJob):
         preview = {
             'dist': dist,
             }
+        return output, preview
+
+class CorruptionJob(BaseJob):
+
+    def __init__(self, save_dir, benchmarks_dir, device=DEVICE,
+                 batch_size=BATCH_SIZE, worker_num=WORKER_NUM):
+        super(BaseJob).__init__(save_dir)
+        self.benchmarks_dir = benchmarks_dir
+        self.device = device
+        self.batch_size = batch_size
+        self.worker_num = worker_num
+
+    def get_work_config(self, arg_strs):
+        parser = argparse.ArgumentParser()
+
+        parser.add_argument('--model_pth')
+        parser.add_argument('--corruption', choices=[
+            'gaussian_noise', 'shot_noise', 'impulse_noise',
+            'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
+            'snow', 'frost', 'frog', 'brightness',
+            'contrast', 'elastic_transform', 'pixelate', 'jpeg_compression',
+            ])
+        parser.add_argument('severity', default=5, type=int)
+
+        args = parser.parse_args(arg_strs)
+
+        corrupt_config = {
+            'model_pth': args.model_pth,
+            'corruption': args.corruption,
+            'severity': args.severity,
+            }
+        return corrupt_config
+
+    def main(self, corrupt_config):
+        saved = torch.load(corrupt_config['model_pth'])
+        model = saved['model']
+        task = saved['config']['model_config']['task']
+
+        if task=='CIFAR10':
+            images = np.load(os.path.join(
+                self.benchmarks_dir, 'CIFAR-10-C',
+                '{}.npy'.format(corrupt_config['corruption']),
+                ))
+            s = corrupt_config['severity']
+            images = images[(s-1)*10000:s*10000].transpose(0, 3, 1, 2)
+            labels = np.load(os.path.join(
+                self.benchmarks_dir, 'CIFAR-10-C', 'labels.npy'
+                ))[:10000]
+
+            dataset = TensorDataset(
+                torch.tensor(images, dtype=torch.float),
+                torch.tensor(labels, dtype=torch.long),
+                )
+
+        loss, acc = evaluate(model, dataset,
+                             self.device, self.batch_size, self.worker_num)
+        output = {'loss': loss, 'acc': acc}
+        preview = {'loss': loss, 'acc': acc}
         return output, preview
 
 
@@ -234,6 +294,7 @@ def test_random_distortions(model, task, d_type, d_val, benchmarks_dir, cache_di
     dataset = random_distortion_dataset(task, d_type, d_val, benchmarks_dir, cache_dir)
     loss, acc = evaluate(model, dataset)
     return loss, acc
+
 
 def test_adversarial_attack(model, task, attacks, benchmarks_dir,
                             success_rate=0.999, eps_step=1e-3):
