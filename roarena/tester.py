@@ -89,7 +89,7 @@ class CorruptionJob(BaseJob):
 
     def __init__(self, save_dir, benchmarks_dir, device=DEVICE,
                  batch_size=BATCH_SIZE, worker_num=WORKER_NUM):
-        super(BaseJob).__init__(save_dir)
+        super(BaseJob, self).__init__(save_dir)
         self.benchmarks_dir = benchmarks_dir
         self.device = device
         self.batch_size = batch_size
