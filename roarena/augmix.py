@@ -289,6 +289,7 @@ def get_configs(arg_strs=None):
 def main(model_config, train_config, aug_config, run_config=None):
     print('model config:\n{}'.format(model_config))
     print('train config:\n{}'.format(train_config))
+    print('aug config:\n{}'.format(aug_config))
     run_config = update_default({
         'benchmarks_dir': 'benchmarks',
         'eval_device': EVAL_DEVICE,

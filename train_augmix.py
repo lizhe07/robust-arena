@@ -13,7 +13,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--save_dir', default='augmix_models')
 parser.add_argument('--benchmarks_dir', default='benchmarks')
-parser.add_argument('--max_wait', default=60, type=float, help='seconds of wait before each job')
+parser.add_argument('--max_wait', default=10, type=float, help='seconds of wait before each job')
 parser.add_argument('--process_num', default=0, type=int, help='number of works to process')
 parser.add_argument('--tolerance', default=float('inf'), type=float, help='hours since start')
 
