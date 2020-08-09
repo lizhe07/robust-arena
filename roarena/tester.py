@@ -105,7 +105,7 @@ class CorruptionJob(BaseJob):
             'snow', 'frost', 'frog', 'brightness',
             'contrast', 'elastic_transform', 'pixelate', 'jpeg_compression',
             ])
-        parser.add_argument('severity', default=5, type=int)
+        parser.add_argument('--severity', default=5, type=int)
 
         args = parser.parse_args(arg_strs)
 
