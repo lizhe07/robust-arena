@@ -246,8 +246,8 @@ def get_configs(arg_strs=None):
     parser.add_argument('--epoch_num', default=50, type=int)
 
     parser.add_argument('--mixture_width', default=3, type=int)
-    parser.add_argument('--mixture_depth', default=1, type=int)
-    parser.add_argument('--aug_severity', default=3, type=int)
+    parser.add_argument('--mixture_depth', default=-1, type=int)
+    parser.add_argument('--aug_severity', default=1, type=int)
     parser.add_argument('--no_jsd', action='store_true')
     parser.add_argument('--all_ops', action='store_true')
 
