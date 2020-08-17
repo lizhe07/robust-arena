@@ -125,7 +125,7 @@ class CorruptionJob(BaseJob):
             images = np.load(os.path.join(
                 self.benchmarks_dir, 'CIFAR-10-C',
                 '{}.npy'.format(corrupt_config['corruption']),
-                ))
+                ))/255.
             s = corrupt_config['severity']
             images = images[(s-1)*10000:s*10000].transpose(0, 3, 1, 2)
             labels = np.load(os.path.join(
