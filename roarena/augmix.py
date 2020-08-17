@@ -206,7 +206,7 @@ def train(model, optimizer, dataset, weight, no_jsd, batch_size, device,
             p_clean = F.softmax(logits, dim=1)
             p_aug1 = F.softmax(logits_aug1, dim=1)
             p_aug2 = F.softmax(logits_aug2, dim=1)
-            p_mixture = torch.clamp((p_clean+p_aug1+p_aug2)/3., 1e-7, 1)
+            p_mixture = torch.clamp((p_clean+p_aug1+p_aug2)/3., 1e-7, 1).log()
             loss += 12*(F.kl_div(p_mixture, p_clean, reduction='batchmean')+
                         F.kl_div(p_mixture, p_aug1, reduction='batchmean')+
                         F.kl_div(p_mixture, p_aug2, reduction='batchmean'))/3.
