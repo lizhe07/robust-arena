@@ -83,8 +83,8 @@ def get_configs(arg_strs=None):
 
 
 def main(model_pth, corrupt_config, **kwargs):
-    print('model path: {}'.format(model_pth))
-    print('corruption config: {}'.format(corrupt_config))
+    print('model path:\n{}'.format(model_pth))
+    print('corruption config:\n{}'.format(corrupt_config))
     run_config = update_default({
         'datasets_dir': 'vision_datasets',
         'device': DEVICE,
