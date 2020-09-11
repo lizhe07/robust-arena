@@ -60,9 +60,11 @@ class AdvAttackJob(BaseJob):
         preview = {
             'success_rate': np.mean(successes),
             'dist_mean': np.mean(dists),
+            'dist_01': np.quantile(dists, 0.01),
             'dist_25': np.quantile(dists, 0.25),
             'dist_50': np.quantile(dists, 0.50),
             'dist_75': np.quantile(dists, 0.75),
+            'dist_99': np.quantile(dists, 0.99),
             }
         return output, preview
 
@@ -105,10 +107,8 @@ def dataset_forwardpass(model, dataset, device=DEVICE, batch_size=EVAL_BATCH_SIZ
     return images, labels, predicts
 
 
-def get_configs(arg_strs):
+def get_configs(arg_strs=None):
     parser = argparse.ArgumentParser()
-
-    parser.add_argument()
 
     parser.add_argument('--model_pth')
     parser.add_argument('--metric', default='Linf', choices=['L2', 'Linf'])
