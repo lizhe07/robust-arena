@@ -92,16 +92,17 @@ def main(model_pth, corrupt_config, **kwargs):
         'worker_num': WORKER_NUM,
         }, kwargs)
 
+    # load model
     saved = torch.load(model_pth)
     model = saved['model']
 
+    # evaluate on common corruption dataset
     dataset = prepare_dataset(
         saved['config']['model_config']['task'],
         corrupt_config['corruption'],
         corrupt_config['severity'],
         run_config['datasets_dir'],
         )
-
     loss, acc = evaluate(
         model, dataset, run_config['device'],
         run_config['eval_batch_size'], run_config['worker_num']
