@@ -38,10 +38,8 @@ class ReconsJob(BaseJob):
             **work_config, **self.run_config
             )
         output = {
-            'imgs_orig': imgs_orig,
             'imgs_reco': imgs_reco,
             'acts_orig': acts_orig,
-            'acts_reco': acts_reco,
             }
         preview = {
             'img_mse': np.power(imgs_orig-imgs_reco, 2).mean(),
