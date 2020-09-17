@@ -19,5 +19,4 @@ RUN pip install -e augmix
 RUN pip install -e foolbox
 
 RUN git clone https://$GITHUB_USERNAME:$GITHUB_PASSWORD@github.com/lizhe07/robust-arena.git
-RUN mv /robust-arena/foolbox_fix/brendel_bethge.py /foolbox/foolbox/attacks
 WORKDIR robust-arena

@@ -23,13 +23,13 @@ ATTACKS = {
         'PGD': fb.attacks.L2ProjectedGradientDescentAttack(),
         'BI': fb.attacks.L2BasicIterativeAttack(),
         'DF': fb.attacks.L2DeepFoolAttack(),
-        'BB': fb.attacks.L2BrendelBethgeAttack(init_attack=fb.attacks.L2BasicIterativeAttack()),
+        'BB': fb.attacks.L2BrendelBethgeAttack(),
         },
     'Linf': {
         'PGD': fb.attacks.LinfProjectedGradientDescentAttack(),
         'BI': fb.attacks.LinfBasicIterativeAttack(),
         'DF': fb.attacks.LinfDeepFoolAttack(),
-        'BB': fb.attacks.LinfinityBrendelBethgeAttack(init_attack=fb.attacks.LinfBasicIterativeAttack()),
+        'BB': fb.attacks.LinfinityBrendelBethgeAttack(),
         },
     }
 
@@ -80,7 +80,16 @@ def attack_model(model, dataset, attack, eps, device=DEVICE,
     advs, successes = [], []
     for images, labels in loader:
         _images, _labels = ep.astensors(images.to(device), labels.to(device))
-        _, _advs, _successes = attack(fmodel, _images, _labels, epsilons=eps)
+        if isinstance(attack, fb.attacks.brendel_bethge.BrendelBethgeAttack):
+            if isinstance(attack, fb.attacks.L2BrendelBethgeAttack):
+                init_attack = fb.attacks.L2BasicIterativeAttack()
+            if isinstance(attack, fb.attacks.LinfinityBrendelBethgeAttack):
+                init_attack = fb.attacks.LinfBasicIterativeAttack()
+            _, starting_points, _ = init_attack(fmodel, _images, _labels, epsilons=1.)
+            _, _advs, _successes = attack(fmodel, _images, _labels, epsilons=eps,
+                                          starting_points=starting_points)
+        else:
+            _, _advs, _successes = attack(fmodel, _images, _labels, epsilons=eps)
         advs.append(_advs.raw.cpu())
         successes.append(_successes.raw.cpu())
     advs = torch.cat(advs)
