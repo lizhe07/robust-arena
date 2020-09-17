@@ -162,6 +162,7 @@ def main(model_pth, attack_config, **kwargs):
     # attack model with increasing eps
     attack = ATTACKS[attack_config['metric']][attack_config['name']]
     eps = 0
+    last_succ_rate = 0.
     while successes.to(torch.float).mean()<attack_config['success_threshold']:
         eps += attack_config['eps_step']
         print('attacking with eps {:.3f}...'.format(eps))
@@ -174,10 +175,12 @@ def main(model_pth, attack_config, **kwargs):
                                          run_config['worker_num'])
         advs[idxs], successes[idxs] = _advs, _successes
         toc = time.time()
-        print('success rate {:7.2%} ({})'.format(
-            successes.to(torch.float).mean(),
-            time_str(toc-tic),
-            ))
+        curr_succ_rate = successes.to(torch.float).mean()
+        if curr_succ_rate-last_succ_rate>0.01:
+            print('success rate {:7.2%} ({})'.format(
+                curr_succ_rate, time_str(toc-tic),
+                ))
+            last_succ_rate = curr_succ_rate
     dists = attack.distance(images, advs).numpy()
     advs = advs.numpy()
     successes = successes.numpy()
