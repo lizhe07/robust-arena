@@ -7,6 +7,7 @@ Created on Thu Sep 10 23:14:41 2020
 
 import argparse, time, torch
 import numpy as np
+from torch.utils.data import Subset
 
 from jarvis import BaseJob
 from jarvis.vision import prepare_datasets
@@ -101,6 +102,7 @@ def get_configs(arg_strs=None):
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--model_pth')
+    parser.add_argument('--k_idx', default=0, type=int, help='index of thousand batch')
     parser.add_argument('--l_idx', default=0, type=int)
     parser.add_argument('--noise', default=0., type=float)
     parser.add_argument('--sigma', default=0.1, type=float)
@@ -112,6 +114,7 @@ def get_configs(arg_strs=None):
 
     model_pth = args.model_pth
     recons_config = {
+        'k_idx': args.k_idx,
         'l_idx': args.l_idx,
         'noise': args.noise,
         'sigma': args.sigma,
@@ -141,6 +144,9 @@ def main(model_pth, recons_config, **kwargs):
         saved['config']['model_config']['task'],
         run_config['datasets_dir'],
         )
+    dataset = Subset(dataset, list(range(
+        recons_config['k_idx']*1000, (recons_config['k_idx']+1)*1000
+        )))
 
     # reconstruct from one layer
     imgs_orig, imgs_reco, acts_orig, acts_reco = reconstruct(
