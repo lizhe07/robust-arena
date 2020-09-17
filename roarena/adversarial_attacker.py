@@ -23,13 +23,13 @@ ATTACKS = {
         'PGD': fb.attacks.L2ProjectedGradientDescentAttack(),
         'BI': fb.attacks.L2BasicIterativeAttack(),
         'DF': fb.attacks.L2DeepFoolAttack(),
-        'BB': fb.attacks.L2BrendelBethgeAttack(),
+        'BB': fb.attacks.L2BrendelBethgeAttack(init_attack=fb.attacks.L2BasicIterativeAttack()),
         },
     'Linf': {
         'PGD': fb.attacks.LinfProjectedGradientDescentAttack(),
         'BI': fb.attacks.LinfBasicIterativeAttack(),
         'DF': fb.attacks.LinfDeepFoolAttack(),
-        'BB': fb.attacks.LinfinityBrendelBethgeAttack(),
+        'BB': fb.attacks.LinfinityBrendelBethgeAttack(init_attack=fb.attacks.LinfBasicIterativeAttack()),
         },
     }
 
@@ -159,7 +159,10 @@ def main(model_pth, attack_config, **kwargs):
         tic = time.time()
         idxs, = (successes!=True).numpy().nonzero()
         _dataset = torch.utils.data.TensorDataset(images[idxs], labels[idxs])
-        _advs, _successes = attack_model(model, _dataset, attack, eps)
+        _advs, _successes = attack_model(model, _dataset, attack, eps,
+                                         run_config['device'],
+                                         run_config['eval_batch_size'],
+                                         run_config['worker_num'])
         advs[idxs], successes[idxs] = _advs, _successes
         toc = time.time()
         print('success rate {:7.2%} ({})'.format(
