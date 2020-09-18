@@ -80,16 +80,7 @@ def attack_model(model, dataset, attack, eps, device=DEVICE,
     advs, successes = [], []
     for images, labels in loader:
         _images, _labels = ep.astensors(images.to(device), labels.to(device))
-        if isinstance(attack, fb.attacks.brendel_bethge.BrendelBethgeAttack):
-            if isinstance(attack, fb.attacks.L2BrendelBethgeAttack):
-                init_attack = fb.attacks.L2BasicIterativeAttack()
-            if isinstance(attack, fb.attacks.LinfinityBrendelBethgeAttack):
-                init_attack = fb.attacks.LinfBasicIterativeAttack()
-            _, starting_points, _ = init_attack(fmodel, _images, _labels, epsilons=1.)
-            _, _advs, _successes = attack(fmodel, _images, _labels, epsilons=eps,
-                                          starting_points=starting_points)
-        else:
-            _, _advs, _successes = attack(fmodel, _images, _labels, epsilons=eps)
+        _, _advs, _successes = attack(fmodel, _images, _labels, epsilons=eps)
         advs.append(_advs.raw.cpu())
         successes.append(_successes.raw.cpu())
     advs = torch.cat(advs)
@@ -123,9 +114,15 @@ def get_configs(arg_strs=None):
     parser.add_argument('--metric', default='Linf', choices=['L2', 'Linf'])
     parser.add_argument('--name', default='PGD', choices=['PGD', 'BI', 'DF', 'BB'])
     parser.add_argument('--success_threshold', default=0.999, type=float)
-    parser.add_argument('--eps_step', default=1e-3, type=float)
+    parser.add_argument('--eps_step', type=float)
 
     args = parser.parse_args(arg_strs)
+
+    if args.eps_step is None:
+        if args.metric=='L2':
+            args.eps_step = 0.01
+        if args.metric=='Linf':
+            args.eps_step = 0.001
 
     model_pth = args.model_pth
     attack_config = {
@@ -161,6 +158,21 @@ def main(model_pth, attack_config, **kwargs):
 
     # attack model with increasing eps
     attack = ATTACKS[attack_config['metric']][attack_config['name']]
+    if attack_config['name']=='BB':
+        if torch.cuda.is_available() and run_config['device']=='cuda':
+            device = 'cuda'
+        else:
+            device = 'cpu'
+        model.eval().to(device)
+        fmodel = fb.PyTorchModel(model, bounds=(0, 1))
+
+        init_attack = fb.attacks.DatasetAttack()
+        loader = torch.utils.data.DataLoader(dataset, batch_size=run_config['eval_batch_size'])
+        for _images, _ in loader:
+            init_attack.feed(fmodel, ep.astensor(_images.to(device)))
+        attack.init_attack = init_attack
+        print('dataset attack prepared as initial attack')
+
     eps = 0
     last_succ_rate = 0.
     while successes.to(torch.float).mean()<attack_config['success_threshold']:
