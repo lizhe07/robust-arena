@@ -175,10 +175,10 @@ def main(model_pth, attack_config, **kwargs):
 
     eps = 0
     last_succ_rate = 0.
+    tic = time.time()
     while successes.to(torch.float).mean()<attack_config['success_threshold']:
         eps += attack_config['eps_step']
         print('attacking with eps {:.3f}...'.format(eps))
-        tic = time.time()
         idxs, = (successes!=True).numpy().nonzero()
         _dataset = torch.utils.data.TensorDataset(images[idxs], labels[idxs])
         _advs, _successes = attack_model(model, _dataset, attack, eps,
@@ -186,13 +186,14 @@ def main(model_pth, attack_config, **kwargs):
                                          run_config['eval_batch_size'],
                                          run_config['worker_num'])
         advs[idxs], successes[idxs] = _advs, _successes
-        toc = time.time()
         curr_succ_rate = successes.to(torch.float).mean()
-        if curr_succ_rate-last_succ_rate>0.01:
+        if curr_succ_rate-last_succ_rate>0.01 or curr_succ_rate>=attack_config['success_threshold']:
+            toc = time.time()
             print('success rate {:7.2%} ({})'.format(
                 curr_succ_rate, time_str(toc-tic),
                 ))
             last_succ_rate = curr_succ_rate
+            tic = time.time()
     dists = attack.distance(images, advs).numpy()
     advs = advs.numpy()
     successes = successes.numpy()
