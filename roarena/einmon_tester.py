@@ -48,7 +48,7 @@ class EinMonJob(BaseJob):
 def prepare_datasets(task, alpha, datasets_dir):
     with open('{}/{}-EM/alpha_{:02d}.pickle'.format(
             datasets_dir, task, int(100*alpha),
-            ), 'wb') as f:
+            ), 'rb') as f:
         saved = pickle.load(f)
     images = saved['images_mix']
     labels_low = saved['labels_low']
@@ -100,7 +100,7 @@ def get_configs(arg_strs=None):
 
 def main(model_pth, alpha, **kwargs):
     print('model path:\n{}'.format(model_pth))
-    print('alpha:\n{}'.format(alpha))
+    print('alpha:\n{:g}'.format(alpha))
     run_config = update_default({
         'datasets_dir': 'vision_datasets',
         'device': DEVICE,
