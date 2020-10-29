@@ -1,4 +1,4 @@
-FROM zheli18/pytorch:1.6.0-cp38-cuda102-1804
+FROM zheli18/pytorch:1.7.0-cp38-cuda110-2004
 
 # Github username and password
 ARG GITHUB_USERNAME
