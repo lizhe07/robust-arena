@@ -51,7 +51,7 @@ class AdvAttackJob(BaseJob):
         return work_config
 
     def main(self, work_config):
-        advs, successes, dists = main(**work_config, **self.run_config)
+        *_, advs, successes, dists = main(**work_config, **self.run_config)
         output = {
             'advs': advs,
             'successes': successes,
@@ -197,4 +197,4 @@ def main(model_pth, attack_config, **kwargs):
     dists = attack.distance(images, advs).numpy()
     advs = advs.numpy()
     successes = successes.numpy()
-    return advs, successes, dists
+    return images, labels, predicts, advs, successes, dists
