@@ -22,13 +22,21 @@ WORKER_NUM = 0
 
 ATTACKS = {
     'L2': {
+        'PGD': fb.attacks.L2ProjectedGradientDescentAttack(),
+        'BI': fb.attacks.L2BasicIterativeAttack(),
         'DF': fb.attacks.L2DeepFoolAttack(),
         'BB': fb.attacks.L2BrendelBethgeAttack(),
         },
     'Linf': {
+        'PGD': fb.attacks.LinfProjectedGradientDescentAttack(),
+        'BI': fb.attacks.LinfBasicIterativeAttack(),
         'DF': fb.attacks.LinfDeepFoolAttack(),
         'BB': fb.attacks.LinfinityBrendelBethgeAttack(),
         },
+    }
+EPS_RESOL = {
+    'L2': 0.01,
+    'Linf': 1/255,
     }
 
 
@@ -84,24 +92,32 @@ def get_configs(arg_strs=None):
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--model_pth')
+    parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--metric', default='L2', choices=['L2', 'Linf'])
-    parser.add_argument('--name', default='BB', choices=['DF', 'BB'])
+    parser.add_argument('--name', default='BB', choices=['PGD', 'BI', 'DF', 'BB'])
     parser.add_argument('--is_targeted', action='store_true')
     parser.add_argument('--batch_size', default=25, type=int)
     parser.add_argument('--batch_idx', default=0, type=int)
-    parser.add_argument('--seed', default=0, type=int)
+    parser.add_argument('--eps', type=float)
 
     args, _ = parser.parse_known_args(arg_strs)
 
     assert args.model_pth is not None
+    if args.eps is None:
+        assert args.name in ['DF', 'BB'], 'eps=None is only implemented for DF and BB attack now'
+        eps_level = None
+    else:
+        eps_level = int(args.eps/EPS_RESOL[args.metric])
+        assert eps_level>0
     attack_config = {
         'model_pth': args.model_pth,
+        'seed': get_seed(args.seed),
         'metric': args.metric,
         'name': args.name,
         'is_targeted': args.is_targeted,
         'batch_size': args.batch_size,
         'batch_idx': args.batch_idx,
-        'seed': get_seed(args.seed),
+        'eps_level': eps_level,
         }
     return attack_config
 
@@ -158,10 +174,17 @@ def main(attack_config, **kwargs):
     # attack model with foolbox
     fmodel = fb.PyTorchModel(model, bounds=(0, 1))
     tic = time.time()
-    _, advs, successes = attack(fmodel, images, criterion, epsilons=None)
+    if attack_config['eps_level'] is None:
+        eps = None
+    else:
+        eps = attack_config['eps_level']*EPS_RESOL[attack_config['metric']]
+    _, advs, successes = attack(fmodel, images, criterion, epsilons=eps)
     dists = attack.distance(images, advs)
     advs, successes, dists = advs.numpy(), successes.numpy(), dists.numpy()
     toc = time.time()
-    print('mean distance: {:.3f} ({})'.format(dists.mean(), time_str(toc-tic)))
+    if eps is None:
+        print('mean distance: {:.3f} ({})'.format(dists.mean(), time_str(toc-tic)))
+    else:
+        print('success rate: {:.2%} ({})'.format(successes.mean(), time_str(toc-tic)))
 
     return advs, successes, dists
