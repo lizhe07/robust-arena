@@ -8,6 +8,7 @@ RUN touch /root/.ssh/known_hosts
 RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
 RUN git clone git@github.com:lizhe07/jarvis
 RUN git clone git@github.com:bethgelab/foolbox
+RUN git clone git@github.com:MadryLab/robustness
 RUN git clone git@github.com:lizhe07/robust-arena
 
 FROM base as final
@@ -15,5 +16,7 @@ COPY --from=git-repos /jarvis /jarvis
 RUN pip install -e jarvis
 COPY --from=git-repos /foolbox /foolbox
 RUN pip install -e foolbox
+COPY --from=git-repos /robustness /robustness
+RUN pip install -e robustness
 COPY --from=git-repos /robust-arena /robust-arena
 WORKDIR robust-arena
