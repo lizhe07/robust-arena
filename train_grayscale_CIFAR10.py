@@ -58,8 +58,8 @@ def main(args, store=None):
     trans_test = trans.Compose(trans_test.transforms[:-1]+[trans.Grayscale(), trans.ToTensor()])
     data_path = os.path.expandvars(args.data)
     dataset = DATASETS[args.dataset](data_path, transform_train=trans_train, transform_test=trans_test)
-    dataset.mean = ch.tensor([0.5], dtype=ch.float)
-    dataset.std = ch.tensor([0.2], dtype=ch.float)
+    dataset.mean = ch.tensor([0.], dtype=ch.float)
+    dataset.std = ch.tensor([1.0], dtype=ch.float)
 
     train_loader, val_loader = dataset.make_loaders(args.workers,
                     args.batch_size, data_aug=bool(args.data_aug))
