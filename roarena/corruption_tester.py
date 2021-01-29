@@ -43,6 +43,7 @@ class CorruptionTest(BaseJob):
             super(CorruptionTest, self).__init__()
         else:
             super(CorruptionTest, self).__init__(os.path.join(store_dir, 'corruption_tests'))
+        self.datasets_dir = datasets_dir
         self.device = device
         self.batch_size = batch_size
         self.worker_num = worker_num
@@ -104,7 +105,10 @@ if __name__=='__main__':
     export_dir = os.path.join(args.store_dir, 'exported')
     assert os.path.exists(export_dir), "directory of exported models not found"
 
-    job = CorruptionTest(args.store_dir, args.device, args.batch_size, args.worker_num)
+    job = CorruptionTest(
+        args.store_dir, args.datasets_dir,
+        args.device, args.batch_size, args.worker_num
+        )
     search_spec = {
         'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir)],
         'corruption': CORRUPTIONS,
