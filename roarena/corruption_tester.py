@@ -10,101 +10,86 @@ import numpy as np
 
 from jarvis import BaseJob
 from jarvis.vision import evaluate
-from jarvis.utils import update_default
 
 DEVICE = 'cuda'
-EVAL_BATCH_SIZE = 160
+BATCH_SIZE = 160
 WORKER_NUM = 0
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--store_dir')
+args = parser.parse_args()
 
-class CorruptionTestJob(BaseJob):
 
-    def __init__(self, save_dir, datasets_dir, **kwargs):
-        super(CorruptionTestJob, self).__init__(save_dir)
-        self.run_config = dict(
-            datasets_dir=datasets_dir, **kwargs
-            )
+class CorruptionTest(BaseJob):
 
-    def get_work_config(self, arg_strs):
-        model_pth, corrupt_config = get_configs(arg_strs)
-        work_config = {
-            'model_pth': model_pth,
-            'corrupt_config': corrupt_config,
+    def __init__(self, store_dir, device=DEVICE,
+                 batch_size=BATCH_SIZE, worker_num=WORKER_NUM):
+        if store_dir is None:
+            super(CorruptionTest, self).__init__()
+        else:
+            super(CorruptionTest, self).__init__(os.path.join(store_dir, 'corruption_tests'))
+        self.device = device
+        self.batch_size = batch_size
+        self.worker_num = worker_num
+
+    def get_config(self, arg_strs):
+        parser = argparse.ArgumentParser()
+
+        parser.add_argument('--model_pth')
+        parser.add_argument('--corruption', choices=[
+            'gaussian_noise', 'shot_noise', 'impulse_noise',
+            'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
+            'snow', 'frost', 'fog', 'brightness',
+            'contrast', 'elastic_transform', 'pixelate', 'jpeg_compression',
+            ])
+        parser.add_argument('--severity', default=5, type=int)
+
+        args = parser.parse_args(arg_strs)
+        assert args.model_pth is not None
+        assert args.severity in [1, 2, 3, 4, 5]
+        return {
+            'model_pth': args.model_pth,
+            'corruption': args.corruption,
+            'severity': args.severity,
             }
-        return work_config
 
-    def main(self, work_config):
-        loss, acc = main(**work_config, **self.run_config)
-        output = {
-            'loss': loss,
-            'acc': acc,
-            }
-        preview = output
-        return output, preview
+    def prepare_dataset(self, task, grayscale, corruption, severity):
+        if task=='CIFAR10':
+            npy_dir = os.path.join(self.datasets_dir, 'CIFAR-10-C')
+        if task=='CIFAR100':
+            npy_dir = os.path.join(self.datasets_dir, 'CIFAR-100-C')
 
-
-def prepare_dataset(task, corruption, severity, datasets_dir):
-    if task=='CIFAR10':
-        images = np.load(os.path.join(
-            datasets_dir, 'CIFAR-10-C', f'{corruption}.npy'
-            ))/255.
-        images = images[(severity-1)*10000:severity*10000].transpose(0, 3, 1, 2)
-        labels = np.load(os.path.join(
-            datasets_dir, 'CIFAR-10-C', 'labels.npy'
-            ))[:10000]
-
-        dataset = torch.utils.data.TensorDataset(
-            torch.tensor(images, dtype=torch.float),
-            torch.tensor(labels, dtype=torch.long),
+        images = np.load(os.path.join(npy_dir, f'{corruption}.npy'))/255.
+        images = torch.tensor(
+            images[(severity-1)*10000:severity*10000], dtype=torch.float
+            ).permute(0, 3, 1, 2)
+        labels = torch.tensor(
+            np.load(os.path.join(npy_dir, 'labels.npy'))[:10000], dtype=torch.long
             )
-    return dataset
+        dataset = torch.utils.data.TensorDataset(images, labels)
+        return dataset
 
 
-def get_configs(arg_strs=None):
-    parser = argparse.ArgumentParser()
+    def main(self, config, verbose=True):
+        if verbose:
+            print(config)
 
-    parser.add_argument('--model_pth')
-    parser.add_argument('--corruption', choices=[
-        'gaussian_noise', 'shot_noise', 'impulse_noise',
-        'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
-        'snow', 'frost', 'fog', 'brightness',
-        'contrast', 'elastic_transform', 'pixelate', 'jpeg_compression',
-        ])
-    parser.add_argument('--severity', default=5, type=int)
+        # load model
+        saved = torch.load(config['model_pth'])
+        model = saved['model']
 
-    args = parser.parse_args(arg_strs)
+        # evaluate on common corruption dataset
+        dataset = self.prepare_dataset(
+            saved['task'], saved['grayscale'],
+            config['corruption'], config['severity'],
+            )
+        loss, acc = evaluate(
+            model, dataset, self.device, self.batch_size, self.worker_num,
+            )
+        result = {'loss': loss, 'acc': acc}
+        preview = {}
+        return result, preview
 
-    model_pth = args.model_pth
-    corrupt_config = {
-        'corruption': args.corruption,
-        'severity': args.severity,
-        }
-    return model_pth, corrupt_config
-
-
-def main(model_pth, corrupt_config, **kwargs):
-    print('model path:\n{}'.format(model_pth))
-    print('corruption config:\n{}'.format(corrupt_config))
-    run_config = update_default({
-        'datasets_dir': 'vision_datasets',
-        'device': DEVICE,
-        'eval_batch_size': EVAL_BATCH_SIZE,
-        'worker_num': WORKER_NUM,
-        }, kwargs)
-
-    # load model
-    saved = torch.load(model_pth)
-    model = saved['model']
-
-    # evaluate on common corruption dataset
-    dataset = prepare_dataset(
-        saved['config']['model_config']['task'],
-        corrupt_config['corruption'],
-        corrupt_config['severity'],
-        run_config['datasets_dir'],
-        )
-    loss, acc = evaluate(
-        model, dataset, run_config['device'],
-        run_config['eval_batch_size'], run_config['worker_num']
-        )
-    return loss, acc
+if __name__=='__main__':
+    print('running tester module...')
+    print('store_dir: {}'.format(args.store_dir))
