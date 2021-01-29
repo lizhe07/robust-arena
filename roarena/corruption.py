@@ -5,16 +5,15 @@ Created on Thu Sep 10 16:39:55 2020
 @author: Zhe
 """
 
-import os, argparse, torch
+import os, argparse, pickle, torch
 import numpy as np
 from torchvision.transforms.functional import rgb_to_grayscale
 
 from jarvis import BaseJob
 from jarvis.vision import evaluate
 
-DEVICE = 'cuda'
-BATCH_SIZE = 160
-WORKER_NUM = 0
+from .utils import job_parser
+from . import DEVICE, BATCH_SIZE, WORKER_NUM
 
 CORRUPTIONS = [
     'gaussian_noise', 'shot_noise', 'impulse_noise',
@@ -25,14 +24,14 @@ CORRUPTIONS = [
 SEVERITIES = [1, 2, 3, 4, 5]
 
 
-class CorruptionTest(BaseJob):
+class CorruptionJob(BaseJob):
 
     def __init__(self, store_dir, datasets_dir, device=DEVICE,
                  batch_size=BATCH_SIZE, worker_num=WORKER_NUM):
         if store_dir is None:
-            super(CorruptionTest, self).__init__()
+            super(CorruptionJob, self).__init__()
         else:
-            super(CorruptionTest, self).__init__(os.path.join(store_dir, 'corruption_tests'))
+            super(CorruptionJob, self).__init__(os.path.join(store_dir, 'corruption_tests'))
         self.datasets_dir = datasets_dir
         self.device = device
         self.batch_size = batch_size
@@ -45,7 +44,8 @@ class CorruptionTest(BaseJob):
         parser.add_argument('--corruption', choices=CORRUPTIONS)
         parser.add_argument('--severity', default=5, type=int)
 
-        args = parser.parse_args(arg_strs)
+        args, _ = parser.parse_known_args(arg_strs)
+
         assert args.model_pth is not None
         assert args.severity in SEVERITIES
         return {
@@ -112,28 +112,27 @@ class CorruptionTest(BaseJob):
         return accs
 
 if __name__=='__main__':
-    parser = argparse.ArgumentParser()
+    parser = job_parser()
     parser.add_argument('--store_dir')
     parser.add_argument('--datasets_dir', default='vision_datasets')
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
-    parser.add_argument('--process_num', default=0, type=int)
-    parser.add_argument('--max_wait', default=1, type=float)
-    parser.add_argument('--tolerance', default=float('inf'), type=float)
     args = parser.parse_args()
 
-    export_dir = os.path.join(args.store_dir, 'exported')
-    assert os.path.exists(export_dir), "directory of exported models not found"
+    if args.spec_pth is None:
+        export_dir = os.path.join(args.store_dir, 'exported')
+        assert os.path.exists(export_dir), "directory of exported models not found"
+        search_spec = {
+            'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir)],
+            'corruption': CORRUPTIONS,
+            'severity': SEVERITIES,
+            }
+    else:
+        with open(args.spec_pth, 'rb') as f:
+            search_spec = pickle.load(f)
 
-    job = CorruptionTest(
-        args.store_dir, args.datasets_dir,
-        args.device, args.batch_size, args.worker_num
+    job = CorruptionJob(
+        args.store_dir, args.datasets_dir, args.device, args.batch_size, args.worker_num
         )
-    search_spec = {
-        'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir)],
-        'corruption': CORRUPTIONS,
-        'severity': SEVERITIES,
-        }
-
     job.random_search(search_spec, args.process_num, args.max_wait, args.tolerance)
