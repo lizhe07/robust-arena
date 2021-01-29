@@ -11,8 +11,8 @@ from torchvision.transforms.functional import rgb_to_grayscale
 
 from jarvis import BaseJob
 from jarvis.vision import evaluate
+from jarvis.utils import job_parser
 
-from .utils import job_parser
 from . import DEVICE, BATCH_SIZE, WORKER_NUM
 
 CORRUPTIONS = [

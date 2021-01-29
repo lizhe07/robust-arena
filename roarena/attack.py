@@ -12,9 +12,8 @@ import foolbox as fb
 
 from jarvis import BaseJob
 from jarvis.vision import prepare_datasets
-from jarvis.utils import get_seed, set_seed, time_str
+from jarvis.utils import job_parser, get_seed, set_seed, time_str
 
-from .utils import job_parser
 from . import DEVICE, WORKER_NUM
 BATCH_SIZE = 20
 
@@ -54,7 +53,6 @@ class AttackJob(BaseJob):
         parser.add_argument('--metric', default='L2', choices=['L2', 'Linf'])
         parser.add_argument('--name', default='BB', choices=['PGD', 'BI', 'DF', 'BB'])
         parser.add_argument('--targeted', action='store_true')
-        parser.add_argument('--batch_size', default=25, type=int)
         parser.add_argument('--batch_idx', default=0, type=int)
         parser.add_argument('--eps', type=float)
 
@@ -73,7 +71,6 @@ class AttackJob(BaseJob):
             'metric': args.metric,
             'name': args.name,
             'targeted': args.targeted,
-            'batch_size': args.batch_size,
             'batch_idx': args.batch_idx,
             'eps_level': eps_level,
             }
@@ -98,7 +95,7 @@ class AttackJob(BaseJob):
         else:
             labels = ep.astensor(labels.to(self.device))
             criterion = fb.criteria.Misclassification(labels)
-            return images, criterion
+        return images, criterion
 
     def main(self, config, verbose=True):
         if verbose:
