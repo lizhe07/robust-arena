@@ -7,6 +7,7 @@ Created on Thu Sep 10 16:39:55 2020
 
 import os, argparse, torch
 import numpy as np
+from torchvision.transforms.functional import rgb_to_grayscale
 
 from jarvis import BaseJob
 from jarvis.vision import evaluate
@@ -74,6 +75,8 @@ class CorruptionTest(BaseJob):
         images = torch.tensor(
             images[(severity-1)*10000:severity*10000], dtype=torch.float
             ).permute(0, 3, 1, 2)
+        if grayscale:
+            images = rgb_to_grayscale(images)
         labels = torch.tensor(
             np.load(os.path.join(npy_dir, 'labels.npy'))[:10000], dtype=torch.long
             )
