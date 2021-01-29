@@ -25,7 +25,7 @@ SEVERITIES = [1, 2, 3, 4, 5]
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--store_dir')
-parser.add_arguemtn('--datasets_dir', default='vision_datasets')
+parser.add_argument('--datasets_dir', default='vision_datasets')
 parser.add_argument('--device', default=DEVICE)
 parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
 parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
