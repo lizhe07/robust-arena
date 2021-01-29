@@ -17,6 +17,8 @@ from jarvis.utils import job_parser, get_seed, set_seed, time_str
 from . import DEVICE, WORKER_NUM
 BATCH_SIZE = 20
 
+METRICS = ['L2', 'Linf']
+NAMES = ['PGD', 'BI', 'DF', 'BB']
 ATTACKS = {
     'L2': {
         'PGD': fb.attacks.L2ProjectedGradientDescentAttack(),
@@ -50,11 +52,11 @@ class AttackJob(BaseJob):
 
         parser.add_argument('--model_pth')
         parser.add_argument('--seed', default=0, type=int)
-        parser.add_argument('--metric', default='L2', choices=['L2', 'Linf'])
-        parser.add_argument('--name', default='BB', choices=['PGD', 'BI', 'DF', 'BB'])
+        parser.add_argument('--metric', default='L2', choices=METRICS)
+        parser.add_argument('--name', default='BB', choices=NAMES)
         parser.add_argument('--targeted', action='store_true')
-        parser.add_argument('--batch_idx', default=0, type=int)
         parser.add_argument('--eps', type=float)
+        parser.add_argument('--batch_idx', default=0, type=int)
 
         args, _ = parser.parse_known_args(arg_strs)
 
@@ -71,8 +73,8 @@ class AttackJob(BaseJob):
             'metric': args.metric,
             'name': args.name,
             'targeted': args.targeted,
-            'batch_idx': args.batch_idx,
             'eps_level': eps_level,
+            'batch_idx': args.batch_idx,
             }
         return config
 
@@ -92,7 +94,6 @@ class AttackJob(BaseJob):
             assert not np.any(targets.numpy()==labels.numpy())
             targets = ep.astensor(targets.to(self.device))
             criterion = fb.criteria.TargetedMisclassification(targets)
-            print(hasattr(criterion, "target_classes"))
         else:
             labels = ep.astensor(labels.to(self.device))
             criterion = fb.criteria.Misclassification(labels)
@@ -149,7 +150,7 @@ class AttackJob(BaseJob):
             if eps is None:
                 print('mean distance: {:.3f} ({})'.format(dists.mean(), time_str(toc-tic)))
             else:
-                print('success rate: {:.2%} ({})'.format(successes.mean(), time_str(toc-tic)))
+                print('success rate: {:7.2%} ({})'.format(successes.mean(), time_str(toc-tic)))
 
         result = {
             'advs': advs,
@@ -169,6 +170,10 @@ if __name__=='__main__':
     parser.add_argument('--datasets_dir', default='vision_datasets')
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
+
+    parser.add_argument('--max_seed', default=4, type=int)
+    parser.add_argument('--metric', default='L2', choices=METRICS)
+    parser.add_argument('--batch_num', default=50, type=int)
     args = parser.parse_args()
 
     if args.spec_pth is None:
@@ -176,6 +181,12 @@ if __name__=='__main__':
         assert os.path.exists(export_dir), "directory of exported models not found"
         search_spec = {
             'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir)],
+            'seed': list(range(args.max_seed)),
+            'metric': [args.metric],
+            'name': NAMES,
+            'targeted': [False, True],
+            'eps': [0, 0.25, 0.5, 1., 2.] if args.metric=='L2' else [0, 8/255, 16/255],
+            'batch_idx': list(range(args.batch_num)),
             }
     else:
         with open(args.spec_pth, 'rb') as f:
