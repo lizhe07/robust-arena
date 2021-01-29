@@ -40,7 +40,7 @@ class AttackJob(BaseJob):
         if store_dir is None:
             super(AttackJob, self).__init__()
         else:
-            super(AttackJob, self).__init__(store_dir)
+            super(AttackJob, self).__init__(os.path.join(store_dir, 'adversarial_attacks'))
         self.datasets_dir = datasets_dir
         self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
         self.worker_num = worker_num
@@ -92,6 +92,7 @@ class AttackJob(BaseJob):
             assert not np.any(targets.numpy()==labels.numpy())
             targets = ep.astensor(targets.to(self.device))
             criterion = fb.criteria.TargetedMisclassification(targets)
+            print(hasattr(criterion, "target_classes"))
         else:
             labels = ep.astensor(labels.to(self.device))
             criterion = fb.criteria.Misclassification(labels)
