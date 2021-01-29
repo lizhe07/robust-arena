@@ -170,7 +170,6 @@ if __name__=='__main__':
     parser.add_argument('--datasets_dir', default='vision_datasets')
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
-
     parser.add_argument('--max_seed', default=4, type=int)
     parser.add_argument('--metric', default='L2', choices=METRICS)
     parser.add_argument('--batch_num', default=50, type=int)
@@ -185,7 +184,7 @@ if __name__=='__main__':
             'metric': [args.metric],
             'name': NAMES,
             'targeted': [False, True],
-            'eps': [0, 0.25, 0.5, 1., 2.] if args.metric=='L2' else [0, 8/255, 16/255],
+            'eps': [0.25, 0.5, 1., 2.] if args.metric=='L2' else [8/255, 16/255],
             'batch_idx': list(range(args.batch_num)),
             }
     else:
