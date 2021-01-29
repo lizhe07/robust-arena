@@ -15,14 +15,29 @@ DEVICE = 'cuda'
 BATCH_SIZE = 160
 WORKER_NUM = 0
 
+CORRUPTIONS = [
+    'gaussian_noise', 'shot_noise', 'impulse_noise',
+    'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
+    'snow', 'frost', 'fog', 'brightness',
+    'contrast', 'elastic_transform', 'pixelate', 'jpeg_compression',
+    ]
+SEVERITIES = [1, 2, 3, 4, 5]
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--store_dir')
+parser.add_arguemtn('--datasets_dir', default='vision_datasets')
+parser.add_argument('--device', default=DEVICE)
+parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
+parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
+parser.add_argument('--process_num', default=0, type=int)
+parser.add_argument('--max_wait', default=1, type=float)
+parser.add_argument('--tolerance', default=float('inf'), type=float)
 args = parser.parse_args()
 
 
 class CorruptionTest(BaseJob):
 
-    def __init__(self, store_dir, device=DEVICE,
+    def __init__(self, store_dir, datasets_dir, device=DEVICE,
                  batch_size=BATCH_SIZE, worker_num=WORKER_NUM):
         if store_dir is None:
             super(CorruptionTest, self).__init__()
@@ -36,17 +51,12 @@ class CorruptionTest(BaseJob):
         parser = argparse.ArgumentParser()
 
         parser.add_argument('--model_pth')
-        parser.add_argument('--corruption', choices=[
-            'gaussian_noise', 'shot_noise', 'impulse_noise',
-            'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
-            'snow', 'frost', 'fog', 'brightness',
-            'contrast', 'elastic_transform', 'pixelate', 'jpeg_compression',
-            ])
+        parser.add_argument('--corruption', choices=CORRUPTIONS)
         parser.add_argument('--severity', default=5, type=int)
 
         args = parser.parse_args(arg_strs)
         assert args.model_pth is not None
-        assert args.severity in [1, 2, 3, 4, 5]
+        assert args.severity in SEVERITIES
         return {
             'model_pth': args.model_pth,
             'corruption': args.corruption,
@@ -91,5 +101,14 @@ class CorruptionTest(BaseJob):
         return result, preview
 
 if __name__=='__main__':
-    print('running tester module...')
-    print('store_dir: {}'.format(args.store_dir))
+    export_dir = os.path.join(args.store_dir, 'exported')
+    assert os.path.exists(export_dir), "directory of exported models not found"
+
+    job = CorruptionTest(args.store_dir, args.device, args.batch_size, args.worker_num)
+    search_spec = {
+        'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir)],
+        'corruption': CORRUPTIONS,
+        'severity': SEVERITIES,
+        }
+
+    job.random_search(search_spec, args.process_num, args.max_wait, args.tolerance)
