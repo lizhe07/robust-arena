@@ -24,17 +24,6 @@ CORRUPTIONS = [
     ]
 SEVERITIES = [1, 2, 3, 4, 5]
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--store_dir')
-parser.add_argument('--datasets_dir', default='vision_datasets')
-parser.add_argument('--device', default=DEVICE)
-parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
-parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
-parser.add_argument('--process_num', default=0, type=int)
-parser.add_argument('--max_wait', default=1, type=float)
-parser.add_argument('--tolerance', default=float('inf'), type=float)
-args = parser.parse_args()
-
 
 class CorruptionTest(BaseJob):
 
@@ -100,11 +89,40 @@ class CorruptionTest(BaseJob):
         loss, acc = evaluate(
             model, dataset, self.device, self.batch_size, self.worker_num,
             )
+        if verbose:
+            print('accuracy: {:.2%}'.format(acc))
+
         result = {'loss': loss, 'acc': acc}
         preview = {}
         return result, preview
 
+    def summary(self, model_pths, severity=5):
+        accs = {}
+        for corruption in CORRUPTIONS:
+            accs[corruption] = []
+            for model_pth in model_pths:
+                config = {
+                    'model_pth': model_pth,
+                    'corruption': corruption,
+                    'severity': severity,
+                    }
+                key = self.configs.add(config)
+                if self.is_completed(key):
+                    accs[corruption].append(self.results[key]['acc'])
+        return accs
+
 if __name__=='__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--store_dir')
+    parser.add_argument('--datasets_dir', default='vision_datasets')
+    parser.add_argument('--device', default=DEVICE)
+    parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
+    parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
+    parser.add_argument('--process_num', default=0, type=int)
+    parser.add_argument('--max_wait', default=1, type=float)
+    parser.add_argument('--tolerance', default=float('inf'), type=float)
+    args = parser.parse_args()
+
     export_dir = os.path.join(args.store_dir, 'exported')
     assert os.path.exists(export_dir), "directory of exported models not found"
 
