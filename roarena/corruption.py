@@ -113,7 +113,7 @@ class CorruptionJob(BaseJob):
 
 if __name__=='__main__':
     parser = job_parser()
-    parser.add_argument('--store_dir')
+    parser.add_argument('--store_dir', default='store')
     parser.add_argument('--datasets_dir', default='vision_datasets')
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
@@ -121,7 +121,7 @@ if __name__=='__main__':
     args = parser.parse_args()
 
     if args.spec_pth is None:
-        export_dir = os.path.join(args.store_dir, 'exported')
+        export_dir = os.path.join(args.store_dir, 'models', 'exported')
         assert os.path.exists(export_dir), "directory of exported models not found"
         search_spec = {
             'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir)],
