@@ -25,6 +25,26 @@ SEVERITIES = [1, 2, 3, 4, 5]
 
 
 class CorruptionJob(BaseJob):
+    r"""Tests model robustness on common corruptions.
+
+    Only 'CIFAR10' and 'CIFAR100' are implemented now.
+
+    Args
+    ----
+    store_dir: str
+        The directory for storing results. When `store_dir` is ``None``, no
+        external storage is used.
+    datasets_dir: str
+        The directory for vision datasets, must have 'CIFAR-10-C' and
+        'CIFAR-100-C' as subdirectories.
+    device: str
+        The device for computation.
+    batch_size: int
+        The batch size used during testing.
+    worker_num: int
+        The worker number for data loader.
+
+    """
 
     def __init__(self, store_dir, datasets_dir, device=DEVICE,
                  batch_size=BATCH_SIZE, worker_num=WORKER_NUM):
@@ -33,7 +53,7 @@ class CorruptionJob(BaseJob):
         else:
             super(CorruptionJob, self).__init__(os.path.join(store_dir, 'corruption_tests'))
         self.datasets_dir = datasets_dir
-        self.device = device
+        self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
         self.batch_size = batch_size
         self.worker_num = worker_num
 
@@ -55,6 +75,25 @@ class CorruptionJob(BaseJob):
             }
 
     def prepare_dataset(self, task, grayscale, corruption, severity):
+        r"""Returns common corruption testing set.
+
+        Args
+        ----
+        task: str
+            The task name, can be ``'CIFAR10'`` or ``'CIFAR100'``.
+        grayscale: bool
+            Whether to use grayscale images.
+        corruption: str
+            The corruption name, can only be one of `CORRUPTIONS`.
+        severity: int
+            The severity level, can only be 1 to 5.
+
+        Returns
+        -------
+        dataset: TensorDataset
+            The dataset containing corrupted images and class labels.
+
+        """
         if task=='CIFAR10':
             npy_dir = os.path.join(self.datasets_dir, 'CIFAR-10-C')
         if task=='CIFAR100':
@@ -96,7 +135,23 @@ class CorruptionJob(BaseJob):
         preview = {}
         return result, preview
 
-    def summary(self, model_pths, severity=5):
+    def summarize(self, model_pths, severity=5):
+        r"""Summarizes a list of models.
+
+        Args
+        ----
+        model_pths: list
+            A list of model paths, each of which can be loaded by `torch.load`.
+        severity: int
+            The severity level.
+
+        Returns
+        -------
+        accs: dict
+            A dictionary with corruption names as keys. Each item is a numpy
+            array, containing testing accuracies of each model.
+
+        """
         accs = {}
         for corruption in CORRUPTIONS:
             accs[corruption] = []
@@ -109,6 +164,7 @@ class CorruptionJob(BaseJob):
                 key = self.configs.add(config)
                 if self.is_completed(key):
                     accs[corruption].append(self.results[key]['acc'])
+            accs[corruption] = np.array(accs[corruption])
         return accs
 
 if __name__=='__main__':
