@@ -201,7 +201,7 @@ class AttackJob(BaseJob):
             }
         return result, preview
 
-    def pool_results(self, model_pth, metric='L2', targeted=False, eps=None):
+    def pool_results(self, model_pth, metric='L2', targeted=False, eps=None, max_batch_num=50):
         r"""Pools the results for one model.
 
         Args
@@ -214,6 +214,9 @@ class AttackJob(BaseJob):
             Whether the attack is targeted.
         eps: float
             The attack size.
+        max_batch_num: int
+            The maximum number of batches to gather. Gather all available
+            results when `max_batch_num` is ``None``.
 
         Returns
         -------
@@ -256,6 +259,8 @@ class AttackJob(BaseJob):
                 advs[batch_idx] = result['advs']
                 successes[batch_idx] = result['successes']
                 dists[batch_idx] = result['dists']
+            if max_batch_num is not None and len(advs)==max_batch_num:
+                break
         batch_idxs = sorted(list(advs.keys()))
         if batch_idxs:
             advs = np.concatenate([advs[batch_idx] for batch_idx in batch_idxs])
@@ -265,7 +270,7 @@ class AttackJob(BaseJob):
         else:
             raise RuntimeError(f"no results found for {model_pth}")
 
-    def summarize(self, model_pths, metric='L2', targeted=False, eps=None):
+    def summarize(self, model_pths, metric='L2', targeted=False, eps=None, max_batch_num=50):
         r"""Summarizes a list of models.
 
         Args
@@ -278,6 +283,9 @@ class AttackJob(BaseJob):
             Whether the attack is targeted.
         eps: float
             The attack size.
+        max_batch_num: int
+            The maximum number of batches to gather. Gather all available
+            results when `max_batch_num` is ``None``.
 
         Returns
         -------
@@ -297,9 +305,12 @@ class AttackJob(BaseJob):
         """
         success_rates, dist_percentiles = [], []
         for model_pth in model_pths:
-            _, _, successes, dists = self.pool_results(model_pth, metric, targeted, eps)
+            tic = time.time()
+            _, _, successes, dists = self.pool_results(model_pth, metric, targeted, eps, max_batch_num)
             success_rates.append(successes.mean())
             dist_percentiles.append(np.percentile(dists, np.arange(101)))
+            toc = time.time()
+            print('results pooled for {} ({})'.format(model_pth, time_str(toc-tic)))
         success_rates = np.array(success_rates)
         dist_percentiles = np.array(dist_percentiles)
         return success_rates, dist_percentiles
