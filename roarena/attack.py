@@ -57,7 +57,7 @@ class AttackJob(BaseJob):
         if store_dir is None:
             super(AttackJob, self).__init__()
         else:
-            super(AttackJob, self).__init__(os.path.join(store_dir, 'adversarial_attacks'))
+            super(AttackJob, self).__init__(os.path.join(store_dir, 'attacks'))
         self.datasets_dir = datasets_dir
         self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
         self.worker_num = worker_num
@@ -77,7 +77,7 @@ class AttackJob(BaseJob):
 
         assert args.model_pth is not None
         if args.eps is None: # find minimum eps that gives successful attack
-            assert args.name in ['DF', 'BB'], 'eps=None is only implemented for DF and BB attack now'
+            args.name = 'BB' # only use boundary attack
             eps_level = None
         else:
             eps_level = int(args.eps/EPS_RESOL[args.metric])
