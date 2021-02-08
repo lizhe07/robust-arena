@@ -340,7 +340,6 @@ if __name__=='__main__':
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
     parser.add_argument('--max_seed', default=4, type=int)
-    parser.add_argument('--metric', default='L2', choices=METRICS)
     parser.add_argument('--batch_num', default=50, type=int)
     args = parser.parse_args()
 
@@ -350,7 +349,7 @@ if __name__=='__main__':
         search_spec = {
             'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')],
             'seed': list(range(args.max_seed)),
-            'metric': [args.metric],
+            'metric': METRICS,
             'name': ['BB'],
             'targeted': [False, True],
             'eps': [None],
