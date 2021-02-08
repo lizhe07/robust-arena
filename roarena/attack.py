@@ -17,7 +17,7 @@ from jarvis.utils import job_parser, get_seed, set_seed, time_str
 from . import DEVICE, WORKER_NUM
 BATCH_SIZE = 20
 
-METRICS = ['L2', 'Linf']
+METRICS = ['L2', 'LI']
 NAMES = ['PGD', 'BI', 'DF', 'BB']
 ATTACKS = {
     'L2': {
@@ -26,14 +26,14 @@ ATTACKS = {
         'DF': fb.attacks.L2DeepFoolAttack(),
         'BB': fb.attacks.L2BrendelBethgeAttack(),
         },
-    'Linf': {
+    'LI': {
         'PGD': fb.attacks.LinfProjectedGradientDescentAttack(),
         'BI': fb.attacks.LinfBasicIterativeAttack(),
         'DF': fb.attacks.LinfDeepFoolAttack(),
         'BB': fb.attacks.LinfinityBrendelBethgeAttack(),
         },
     }
-EPS_RESOL = {'L2': 0.01, 'Linf': 1/255}
+EPS_RESOL = {'L2': 0.01, 'LI': 1/255}
 
 
 class AttackJob(BaseJob):
@@ -201,7 +201,8 @@ class AttackJob(BaseJob):
             }
         return result, preview
 
-    def pool_results(self, model_pth, metric='L2', targeted=False, eps=None, max_batch_num=50):
+    def pool_results(self, model_pth, metric='L2', targeted=False, eps=None, *,
+                     max_batch_num=None, preview_only=False):
         r"""Pools the results for one model.
 
         Args
@@ -217,6 +218,8 @@ class AttackJob(BaseJob):
         max_batch_num: int
             The maximum number of batches to gather. Gather all available
             results when `max_batch_num` is ``None``.
+        preview: bool
+            Whether to pool previews only.
 
         Returns
         -------
@@ -242,35 +245,46 @@ class AttackJob(BaseJob):
             'eps_level': eps_level
             }
 
-        advs, successes, dists = {}, {}, {}
+        successes, dists = {}, {}
+        if not preview_only:
+            advs = {}
         for key, config in self.conditioned(cond):
             batch_idx = config['batch_idx']
-            result = self.results[key]
+            if preview_only:
+                preview = self.previews[key]
+                _successes, _dists = preview['successes'], preview['dists']
+            else:
+                result = self.results[key]
+                _successes, _dists, _advs = result['successes'], result['dists'], result['advs']
             if batch_idx in advs:
-                _advs, _successes, _dists = result['advs'], result['successes'], result['dists']
                 if eps is None:
                     idxs, = np.nonzero(_dists<dists[batch_idx])
                 else:
                     idxs, = np.nonzero(_successes.astype(np.float)>successes[batch_idx].astype(np.float))
-                advs[batch_idx][idxs] = _advs[idxs]
                 successes[batch_idx][idxs] = _successes[idxs]
                 dists[batch_idx][idxs] = _dists[idxs]
+                if not preview_only:
+                    advs[batch_idx][idxs] = _advs[idxs]
             else:
-                advs[batch_idx] = result['advs']
-                successes[batch_idx] = result['successes']
-                dists[batch_idx] = result['dists']
+                successes[batch_idx] = _successes
+                dists[batch_idx] = _dists
+                if not preview_only:
+                    advs[batch_idx] = _advs
             if max_batch_num is not None and len(advs)==max_batch_num:
                 break
         batch_idxs = sorted(list(advs.keys()))
         if batch_idxs:
-            advs = np.concatenate([advs[batch_idx] for batch_idx in batch_idxs])
             successes = np.concatenate([successes[batch_idx] for batch_idx in batch_idxs])
             dists = np.concatenate([dists[batch_idx] for batch_idx in batch_idxs])
-            return batch_idxs, advs, successes, dists
+            if preview_only:
+                advs = None
+            else:
+                advs = np.concatenate([advs[batch_idx] for batch_idx in batch_idxs])
+            return batch_idxs, successes, dists, advs
         else:
             raise RuntimeError(f"no results found for {model_pth}")
 
-    def summarize(self, model_pths, metric='L2', targeted=False, eps=None, max_batch_num=50):
+    def summarize(self, model_pths, metric='L2', targeted=False, eps=None, max_batch_num=None):
         r"""Summarizes a list of models.
 
         Args
@@ -300,13 +314,16 @@ class AttackJob(BaseJob):
         --------
         >>> success_rates, _ = job.summarize(model_pths, 'L2', False, 0.5)
 
-        >>> _, dist_percentiles = job.summarize(model_pths, 'Linf', True, None)
+        >>> _, dist_percentiles = job.summarize(model_pths, 'LI', True, None)
 
         """
         success_rates, dist_percentiles = [], []
         for model_pth in model_pths:
             tic = time.time()
-            _, _, successes, dists = self.pool_results(model_pth, metric, targeted, eps, max_batch_num)
+            _, successes, dists, _ = self.pool_results(
+                model_pth, metric, targeted, eps,
+                max_batch_num=max_batch_num, preview_only=True,
+                )
             success_rates.append(successes.mean())
             dist_percentiles.append(np.percentile(dists, np.arange(101)))
             toc = time.time()
@@ -334,9 +351,9 @@ if __name__=='__main__':
             'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir)],
             'seed': list(range(args.max_seed)),
             'metric': [args.metric],
-            'name': NAMES,
+            'name': ['BB'],
             'targeted': [False, True],
-            'eps': [0.25, 0.5, 1., 2.] if args.metric=='L2' else [8/255, 16/255],
+            'eps': [None],
             'batch_idx': list(range(args.batch_num)),
             }
     else:
