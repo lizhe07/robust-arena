@@ -51,7 +51,7 @@ class CorruptionJob(BaseJob):
         if store_dir is None:
             super(CorruptionJob, self).__init__()
         else:
-            super(CorruptionJob, self).__init__(os.path.join(store_dir, 'corruption_tests'))
+            super(CorruptionJob, self).__init__(os.path.join(store_dir, 'c-tests'))
         self.datasets_dir = datasets_dir
         self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
         self.batch_size = batch_size
