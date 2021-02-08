@@ -126,7 +126,7 @@ class CorruptionJob(BaseJob):
             config['corruption'], config['severity'],
             )
         loss, acc = evaluate(
-            model, dataset, self.device, self.batch_size, self.worker_num,
+            model, dataset, self.batch_size, self.device, self.worker_num,
             )
         if verbose:
             print('accuracy: {:.2%}'.format(acc))
