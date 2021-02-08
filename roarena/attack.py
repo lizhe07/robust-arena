@@ -348,7 +348,7 @@ if __name__=='__main__':
         export_dir = os.path.join(args.store_dir, 'models', 'exported')
         assert os.path.exists(export_dir), "directory of exported models not found"
         search_spec = {
-            'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir)],
+            'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')],
             'seed': list(range(args.max_seed)),
             'metric': [args.metric],
             'name': ['BB'],
