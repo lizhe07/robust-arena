@@ -147,9 +147,10 @@ class AttackJob(BaseJob):
         fmodel = fb.PyTorchModel(model, bounds=(0, 1))
 
         # prepare testing dataset
-        dataset = prepare_datasets(
-            saved['task'], self.datasets_dir, grayscale=saved['grayscale'],
-            )
+        kwargs = {'task': saved['task'], 'datasets_dir': self.datasets_dir}
+        if 'grayscale' in saved:
+            kwargs['grayscale'] = saved['grayscale']
+        dataset = prepare_datasets(**kwargs)
 
         # initialize attack
         attack = ATTACKS[config['metric']][config['name']]
@@ -248,6 +249,7 @@ class AttackJob(BaseJob):
         successes, dists = {}, {}
         if not preview_only:
             advs = {}
+        batch_idxs = []
         for key, config in self.conditioned(cond):
             batch_idx = config['batch_idx']
             if preview_only:
@@ -256,7 +258,7 @@ class AttackJob(BaseJob):
             else:
                 result = self.results[key]
                 _successes, _dists, _advs = result['successes'], result['dists'], result['advs']
-            if batch_idx in advs:
+            if batch_idx in batch_idxs:
                 if eps is None:
                     idxs, = np.nonzero(_dists<dists[batch_idx])
                 else:
@@ -270,9 +272,9 @@ class AttackJob(BaseJob):
                 dists[batch_idx] = _dists
                 if not preview_only:
                     advs[batch_idx] = _advs
+                batch_idxs.append(batch_idx)
             if max_batch_num is not None and len(advs)==max_batch_num:
                 break
-        batch_idxs = sorted(list(advs.keys()))
         if batch_idxs:
             successes = np.concatenate([successes[batch_idx] for batch_idx in batch_idxs])
             dists = np.concatenate([dists[batch_idx] for batch_idx in batch_idxs])
@@ -319,15 +321,12 @@ class AttackJob(BaseJob):
         """
         success_rates, dist_percentiles = [], []
         for model_pth in model_pths:
-            tic = time.time()
             _, successes, dists, _ = self.pool_results(
                 model_pth, metric, targeted, eps,
                 max_batch_num=max_batch_num, preview_only=True,
                 )
             success_rates.append(successes.mean())
             dist_percentiles.append(np.percentile(dists, np.arange(101)))
-            toc = time.time()
-            print('results pooled for {} ({})'.format(model_pth, time_str(toc-tic)))
         success_rates = np.array(success_rates)
         dist_percentiles = np.array(dist_percentiles)
         return success_rates, dist_percentiles
