@@ -7,6 +7,7 @@ Created on Fri Feb 19 18:18:14 2021
 
 import os, argparse, pickle, torch
 from torch.utils.data import DataLoader
+import numpy as np
 
 from jarvis import BaseJob
 from jarvis.utils import job_parser
@@ -51,7 +52,6 @@ class NoiseJob(BaseJob):
             'n_val': args.n_val,
             }
 
-
     def distort(self, images, n_type, n_val):
         if n_type=='Gaussian':
             images += torch.randn_like(images)*n_val
@@ -62,7 +62,6 @@ class NoiseJob(BaseJob):
             images = images+saltpepper
         images = torch.clamp(images, 0, 1)
         return images
-
 
     def evaluate(self, model, dataset, n_type, n_val):
         model.eval().to(self.device)
@@ -82,7 +81,6 @@ class NoiseJob(BaseJob):
         loss = loss/len(dataset)
         acc = count/len(dataset)
         return loss, acc
-
 
     def main(self, config, verbose=True):
         if verbose:
@@ -105,6 +103,36 @@ class NoiseJob(BaseJob):
         result = {'loss': loss, 'acc': acc}
         preview = {}
         return result, preview
+
+    def summarize(self, model_pths, n_type, n_vals):
+        r"""Summarizes a list of models.
+
+        Args
+        ----
+        model_pths: list
+            A list of model paths, each of which can be loaded by `torch.load`.
+
+        Returns
+        -------
+        accs: dict
+            A dictionary with corruption names as keys. Each item is a numpy
+            array, containing testing accuracies of each model.
+
+        """
+        accs = {}
+        for n_val in n_vals:
+            accs[n_val] = []
+            for model_pth in model_pths:
+                config = {
+                    'model_pth': model_pth,
+                    'n_type': n_type,
+                    'n_val': n_val,
+                    }
+                key = self.configs.add(config)
+                if self.is_completed(key):
+                    accs[n_val].append(self.results[key]['acc'])
+            accs[n_val] = np.array(accs[n_val])
+        return accs
 
 
 if __name__=='__main__':
