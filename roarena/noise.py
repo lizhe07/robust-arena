@@ -78,7 +78,7 @@ class NoiseJob(BaseJob):
                 logits = model(images)
                 loss += criterion(logits, labels).item()
                 _, predicts = logits.max(dim=1)
-                count += (predicts.cpu()==labels).to(torch.float).sum().item()
+                count += (predicts==labels).to(torch.float).sum().item()
         loss = loss/len(dataset)
         acc = count/len(dataset)
         return loss, acc
