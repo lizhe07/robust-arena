@@ -94,6 +94,7 @@ class CorruptionJob(BaseJob):
             The dataset containing corrupted images and class labels.
 
         """
+        assert task in ['CIFAR10', 'CIFAR100']
         if task=='CIFAR10':
             npy_dir = os.path.join(self.datasets_dir, 'CIFAR-10-C')
         if task=='CIFAR100':
