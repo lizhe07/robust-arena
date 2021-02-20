@@ -321,14 +321,17 @@ class AttackJob(BaseJob):
         """
         success_rates, dist_percentiles = [], []
         for model_pth in model_pths:
-            _, successes, dists, _ = self.pool_results(
-                model_pth, metric, targeted, eps,
-                max_batch_num=max_batch_num, preview_only=True,
-                )
+            try:
+                _, successes, dists, _ = self.pool_results(
+                    model_pth, metric, targeted, eps,
+                    max_batch_num=max_batch_num, preview_only=True,
+                    )
+            except:
+                continue
             success_rates.append(successes.mean())
             dist_percentiles.append(np.percentile(dists, np.arange(101)))
         success_rates = np.array(success_rates)
-        dist_percentiles = np.array(dist_percentiles)
+        dist_percentiles = np.array(dist_percentiles).reshape(-1, 101) # reshape for empty array
         return success_rates, dist_percentiles
 
 
