@@ -123,7 +123,7 @@ class CorruptionJob(BaseJob):
 
         # evaluate on common corruption dataset
         dataset = self.prepare_dataset(
-            saved['task'], saved['grayscale'],
+            saved['task'], saved['grayscale'] if 'grayscale' in saved else False,
             config['corruption'], config['severity'],
             )
         loss, acc = evaluate(
