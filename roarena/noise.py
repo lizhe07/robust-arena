@@ -16,7 +16,7 @@ from jarvis.vision import prepare_datasets
 from . import DEVICE, BATCH_SIZE, WORKER_NUM
 
 NOISE_TYPES = ['Gaussian', 'Uniform', 'SaltPepper']
-DEFALT_VALS = {
+DEFAULT_VALS = {
     'Gaussian': [0, 0.02, 0.04, 0.06, 0.08, 0.1],
     'Uniform': [0, 0.02, 0.04, 0.06, 0.08],
     'SaltPepper': [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3],
@@ -151,7 +151,7 @@ if __name__=='__main__':
         search_spec = {
             'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')],
             'n_type': [args.n_type],
-            'n_val': DEFALT_VALS[args.n_type],
+            'n_val': DEFAULT_VALS[args.n_type],
             }
     else:
         with open(args.spec_pth, 'rb') as f:
