@@ -273,7 +273,7 @@ class AttackJob(BaseJob):
                 if not preview_only:
                     advs[batch_idx] = _advs
                 batch_idxs.append(batch_idx)
-            if max_batch_num is not None and len(advs)==max_batch_num:
+            if max_batch_num is not None and len(batch_idxs)==max_batch_num:
                 break
         if batch_idxs:
             successes = np.concatenate([successes[batch_idx] for batch_idx in batch_idxs])
