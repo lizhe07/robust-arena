@@ -17,9 +17,9 @@ from . import DEVICE, BATCH_SIZE, WORKER_NUM
 
 NOISE_TYPES = ['Gaussian', 'Uniform', 'SaltPepper']
 DEFAULT_VALS = {
-    'Gaussian': [0, 0.02, 0.04, 0.06, 0.08, 0.1],
-    'Uniform': [0, 0.02, 0.04, 0.06, 0.08],
-    'SaltPepper': [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3],
+    'Gaussian': [0.01*i for i in range(11)],
+    'Uniform': [0.02*i for i in range(5)],
+    'SaltPepper': [0.05*i for i in range(7)],
     }
 
 
