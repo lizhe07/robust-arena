@@ -6,6 +6,7 @@ Created on Sun Feb 28 00:01:54 2021
 """
 
 import os, argparse, pickle, torch
+from torchvision.transforms.functional import rgb_to_grayscale
 
 from jarvis import BaseJob
 from jarvis.utils import job_parser
@@ -28,19 +29,17 @@ class EinMonJob(BaseJob):
         self.batch_size = batch_size
         self.worker_num = worker_num
 
-    def prepare_dataset(self, task, alpha):
+    def prepare_dataset(self, task, alpha, grayscale=False):
         with open('{}/{}-EM/alpha_{:02d}.pickle'.format(
                 self.datasets_dir, task, int(100*alpha),
                 ), 'rb') as f:
             saved = pickle.load(f)
-        images = saved['images_mix']
-        labels_low = saved['labels_low']
-        labels_high = saved['labels_high']
-        dataset = torch.utils.data.TensorDataset(
-            torch.tensor(images, dtype=torch.float),
-            torch.tensor(labels_low, dtype=torch.long),
-            torch.tensor(labels_high, dtype=torch.long),
-            )
+        images = torch.tensor(saved['images_mix'], dtype=torch.float)
+        if grayscale:
+            images = rgb_to_grayscale(images)
+        labels_low = torch.tensor(saved['labels_low'], dtype=torch.long)
+        labels_high = torch.tensor(saved['labels_high'], dtype=torch.long)
+        dataset = torch.utils.data.TensorDataset(images, labels_low, labels_high)
         return dataset
 
     def evaluate(self, model, dataset):
