@@ -89,7 +89,10 @@ class EinMonJob(BaseJob):
         model = saved['model']
 
         # prepare Einstein-Monroe dataset
-        dataset = self.prepare_dataset(saved['task'], config['alpha'])
+        dataset = self.prepare_dataset(
+            saved['task'], config['alpha'],
+            grayscale=saved['grayscale'] if 'grayscale' in saved else False,
+            )
 
         # evaluate model
         loss_low, acc_low, loss_high, acc_high = self.evaluate(model, dataset)
