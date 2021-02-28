@@ -353,7 +353,7 @@ if __name__=='__main__':
             'seed': list(range(args.max_seed)),
             'metric': METRICS,
             'name': ['BB'],
-            'targeted': [False, True],
+            'targeted': [False],
             'eps': [None],
             'batch_idx': list(range(args.batch_num)),
             }
