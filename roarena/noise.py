@@ -170,7 +170,7 @@ class NoiseJob(BaseJob):
 
         """
         lines, legends = [], []
-        for i, (tag, _, color), acc in enumerate(groups):
+        for i, (tag, _, color) in enumerate(groups):
             acc_mean = np.array([np.mean(accs[i][n_val]) for n_val in n_vals])*100
             acc_std = np.array([np.std(accs[i][n_val]) for n_val in n_vals])*100
             h, = ax.plot(n_vals, acc_mean, color=color)

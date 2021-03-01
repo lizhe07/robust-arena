@@ -200,7 +200,7 @@ class EinMonJob(BaseJob):
         """
         bin_width = 0.8/len(groups)
         bars, legends = [], []
-        for i, (tag, _, color), acc in enumerate(groups):
+        for i, (tag, _, color) in enumerate(groups):
             acc_mean = np.array([np.mean(accs_low[i][alpha]) for alpha in alphas])*100
             acc_std = np.array([np.std(accs_low[i][alpha]) for alpha in alphas])*100
             h = ax.bar(
@@ -219,7 +219,8 @@ class EinMonJob(BaseJob):
             legends.append(tag)
         ax.legend(bars, legends)
         ax.set_xlabel('normalized cutoff frequency')
-        xticks = ax.get_xticks()
+        xticks = np.arange(len(alphas), step=2)
+        ax.set_xticks(xticks)
         ax.set_xticklabels(['{:.1f}'.format(alphas[xtick]) for xtick in xticks], rotation=90)
         ax.set_ylabel(r'high-freq $\longleftrightarrow$ low-freq')
         ax.set_ylim([-100, 100])

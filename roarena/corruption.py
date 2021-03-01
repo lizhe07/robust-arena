@@ -185,7 +185,7 @@ class CorruptionJob(BaseJob):
         """
         bin_width = 0.8/len(groups)
         bars, legends = [], []
-        for i, (tag, _, color), acc in enumerate(groups):
+        for i, (tag, _, color) in enumerate(groups):
             acc_mean = np.array([np.mean(accs[i][c]) for c in CORRUPTIONS])*100
             acc_std = np.array([np.std(accs[i][c]) for c in CORRUPTIONS])*100
             h = ax.bar(

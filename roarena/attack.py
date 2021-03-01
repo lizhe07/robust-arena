@@ -351,7 +351,7 @@ class AttackJob(BaseJob):
         """
         p_ticks = np.arange(101)
         lines, legends = [], []
-        for i, (tag, _, color), acc in enumerate(groups):
+        for i, (tag, _, color) in enumerate(groups):
             d_mean = np.mean(dist_percentiles[i], axis=0)
             d_std = np.std(dist_percentiles[i], axis=0)
             idxs = d_mean>0
