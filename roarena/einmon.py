@@ -31,6 +31,29 @@ class EinMonJob(BaseJob):
         self.worker_num = worker_num
 
     def prepare_dataset(self, task, alpha, grayscale=False):
+        r"""Prepares the Einstein-Monroe dataset.
+
+        Existing datasets that mix CIFAR images with different mixing
+        frequencies are loaded.
+
+        Args
+        ----
+        task: str
+            The name of the dataset, only supports ``'CIFAR10'`` and
+            ``'CIFAR100'`` for now.
+        alpha: float
+            The normalized mixing frequency.
+        grayscale: bool
+            Whether use grayscale CIFAR images.
+
+        Returns
+        -------
+        dataset: Dataset
+            The Einstein-Monroe dataset. Each item is a tuple
+            `(image, label_low, label_high)`, with class labels for
+            low-frequency and high-frequency component.
+
+        """
         with open('{}/{}-EM/alpha_{:02d}.pickle'.format(
                 self.datasets_dir, task, int(100*alpha),
                 ), 'rb') as f:
@@ -44,6 +67,22 @@ class EinMonJob(BaseJob):
         return dataset
 
     def evaluate(self, model, dataset):
+        r"""Evaluates model.
+
+        Args
+        ----
+        model: nn.Module
+            The pytorch model.
+        dataset: Dataset
+            The dataset of Einstein-Monroe experiment.
+
+        Returns
+        -------
+        loss_low, acc_low, loss_high, acc_high: float
+            Cross entropy loss and accuracy for low and high frequency
+            component respectively.
+
+        """
         model.eval().to(self.device)
         criterion = torch.nn.CrossEntropyLoss(reduction='sum')
 
@@ -109,6 +148,22 @@ class EinMonJob(BaseJob):
         return result, preview
 
     def summarize(self, model_pths, alphas):
+        r"""Summarizes a list of models.
+
+        Args
+        ----
+        model_pths: list
+            A list of model paths, each of which can be loaded by `torch.load`.
+        alphas: list
+            The normalized mixing frequencies.
+
+        Returns
+        -------
+        accs_low, accs_high: dict
+            A dictionary with alpha values as keys. Each item is a numpy array,
+            containing testing accuracies of each model.
+
+        """
         accs_low, accs_high = {}, {}
         for alpha in alphas:
             accs_low[alpha] = []
@@ -125,6 +180,52 @@ class EinMonJob(BaseJob):
             accs_low[alpha] = np.array(accs_low[alpha])
             accs_high[alpha] = np.array(accs_high[alpha])
         return accs_low, accs_high
+
+    def plot_comparison(self, ax, groups, accs_low, accs_high, alphas):
+        r"""Plots comparison of groups.
+
+        Args
+        ----
+        ax: matplot axis
+            The axis for plotting.
+        groups: list
+            Each item is a tuple of `(tag, model_pths, color)`. `tag` is the
+            label for the group, `model_pths` is the list of model pths and
+            `color` is a color tuple of shape `(3,)`.
+        accs_low, accs_high: list
+            Each item is a dictionary returned by `summarize`.
+        alphas: list
+            The normalized mixing frequencies.
+
+        """
+        bin_width = 0.8/len(groups)
+        bars, legends = [], []
+        for i, (tag, _, color), acc in enumerate(groups):
+            acc_mean = np.array([np.mean(accs_low[i][alpha]) for alpha in alphas])*100
+            acc_std = np.array([np.std(accs_low[i][alpha]) for alpha in alphas])*100
+            h = ax.bar(
+                np.arange(len(alphas))+(i-0.5*(len(groups)-1))*bin_width,
+                acc_mean, width=bin_width, yerr=acc_std, zorder=2, facecolor=color,
+                )
+            h.errorbar.get_children()[0].set_edgecolor(np.array(color)*0.6)
+            acc_mean = -np.array([np.mean(accs_high[i][alpha]) for alpha in alphas])*100
+            acc_std = np.array([np.std(accs_high[i][alpha]) for alpha in alphas])*100
+            h = ax.bar(
+                np.arange(len(alphas))+(i-0.5*(len(groups)-1))*bin_width,
+                acc_mean, width=bin_width, yerr=acc_std, zorder=2, facecolor=color,
+                )
+            h.errorbar.get_children()[0].set_edgecolor(np.array(color)*0.6)
+            bars.append(h)
+            legends.append(tag)
+        ax.legend(bars, legends)
+        ax.set_xlabel('normalized cutoff frequency')
+        xticks = ax.get_xticks()
+        ax.set_xticklabels(['{:.1f}'.format(alphas[xtick]) for xtick in xticks], rotation=90)
+        ax.set_ylabel(r'high-freq $\longleftrightarrow$ low-freq')
+        ax.set_ylim([-100, 100])
+        ax.set_yticks([-100, -50, 0, 50, 100])
+        ax.set_yticklabels(['100%', '50%', '0%', '50%', '100%'])
+        ax.grid(axis='y')
 
 
 if __name__=='__main__':
