@@ -158,9 +158,11 @@ class NoiseJob(BaseJob):
         ax: matplot axis
             The axis for plotting.
         groups: list
-            Each item is a list of model paths.
+            Each item is a tuple of `(tag, model_pths, color)`. `tag` is the
+            label for the group, `model_pths` is the list of model pths and
+            `color` is a color tuple of shape `(3,)`.
         accs: list
-            Each item is a dictionary, see `summarize` for more details.
+            Each item is a dictionary returned by `summarize`.
         n_type: str
             The noise type.
         n_vals: list
