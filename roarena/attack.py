@@ -334,6 +334,37 @@ class AttackJob(BaseJob):
         dist_percentiles = np.array(dist_percentiles).reshape(-1, 101) # reshape for empty array
         return success_rates, dist_percentiles
 
+    def plot_comparison(self, ax, groups, dist_percentiles):
+        r"""Plots comparison of groups.
+
+        Args
+        ----
+        ax: matplot axis
+            The axis for plotting.
+        groups: list
+            Each item is a tuple of `(tag, model_pths, color)`. `tag` is the
+            label for the group, `model_pths` is the list of model pths and
+            `color` is a color tuple of shape `(3,)`.
+        dist_percentiles: list
+            Each item is a dictionary returned by `summarize`.
+
+        """
+        p_ticks = np.arange(101)
+        lines, legends = [], []
+        for i, (tag, _, color), acc in enumerate(groups):
+            d_mean = np.mean(dist_percentiles[i], axis=0)
+            d_std = np.std(dist_percentiles[i], axis=0)
+            idxs = d_mean>0
+            h, = ax.plot(d_mean[idxs], p_ticks[idxs], color=color)
+            ax.fill_betweenx(
+                p_ticks[idxs], d_mean[idxs]-d_std[idxs], d_mean[idxs]+d_std[idxs],
+                color=color, alpha=0.2
+                )
+            lines.append(h)
+            legends.append(tag)
+        ax.legend(lines, legends)
+        ax.set_ylabel('success rate (%)')
+
 
 if __name__=='__main__':
     parser = job_parser()
