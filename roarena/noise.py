@@ -128,8 +128,8 @@ class NoiseJob(BaseJob):
                     'n_type': n_type,
                     'n_val': n_val,
                     }
-                key = self.configs.add(config)
-                if self.is_completed(key):
+                key = self.configs.get_key(config)
+                if key is not None and self.is_completed(key):
                     accs[n_val].append(self.results[key]['acc'])
             accs[n_val] = np.array(accs[n_val])
         return accs

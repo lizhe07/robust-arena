@@ -6,6 +6,7 @@ Created on Sun Feb 28 00:01:54 2021
 """
 
 import os, argparse, pickle, torch
+import numpy as np
 from torchvision.transforms.functional import rgb_to_grayscale
 
 from jarvis import BaseJob
@@ -106,6 +107,24 @@ class EinMonJob(BaseJob):
             }
         preview = {}
         return result, preview
+
+    def summarize(self, model_pths, alphas):
+        accs_low, accs_high = {}, {}
+        for alpha in alphas:
+            accs_low[alpha] = []
+            accs_high[alpha] = []
+            for model_pth in model_pths:
+                config = {
+                    'model_pth': model_pth,
+                    'alpha': alpha,
+                    }
+                key = self.configs.get_key(config)
+                if key is not None and self.is_completed(key):
+                    accs_low[alpha].append(self.results[key]['acc_low'])
+                    accs_high[alpha].append(self.results[key]['acc_high'])
+            accs_low[alpha] = np.array(accs_low[alpha])
+            accs_high[alpha] = np.array(accs_high[alpha])
+        return accs_low, accs_high
 
 
 if __name__=='__main__':

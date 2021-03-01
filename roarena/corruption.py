@@ -162,8 +162,8 @@ class CorruptionJob(BaseJob):
                     'corruption': corruption,
                     'severity': severity,
                     }
-                key = self.configs.add(config)
-                if self.is_completed(key):
+                key = self.configs.get_key(config)
+                if key is not None and self.is_completed(key):
                     accs[corruption].append(self.results[key]['acc'])
             accs[corruption] = np.array(accs[corruption])
         return accs
