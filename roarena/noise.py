@@ -53,6 +53,18 @@ class NoiseJob(BaseJob):
             }
 
     def distort(self, images, n_type, n_val):
+        r"""Distorts a batch of images.
+
+        Args
+        ----
+        images: tensor
+            The raw images, of which the range is between `[0, 1]`.
+        n_type: str
+            The noise type.
+        n_val: float
+            The noise value.
+
+        """
         if n_type=='Gaussian':
             images += torch.randn_like(images)*n_val
         if n_type=='Uniform':
@@ -111,12 +123,16 @@ class NoiseJob(BaseJob):
         ----
         model_pths: list
             A list of model paths, each of which can be loaded by `torch.load`.
+        n_type: str
+            The noise type.
+        n_vals: list
+            The noise values.
 
         Returns
         -------
         accs: dict
-            A dictionary with corruption names as keys. Each item is a numpy
-            array, containing testing accuracies of each model.
+            A dictionary with noise values as keys. Each item is a numpy array,
+            containing testing accuracies of each model.
 
         """
         accs = {}
@@ -133,6 +149,37 @@ class NoiseJob(BaseJob):
                     accs[n_val].append(self.results[key]['acc'])
             accs[n_val] = np.array(accs[n_val])
         return accs
+
+    def plot_comparison(self, ax, groups, accs, n_type, n_vals):
+        r"""Plots comparison of groups.
+
+        Args
+        ----
+        ax: matplot axis
+            The axis for plotting.
+        groups: list
+            Each item is a list of model paths.
+        accs: list
+            Each item is a dictionary, see `summarize` for more details.
+        n_type: str
+            The noise type.
+        n_vals: list
+            The noise values.
+
+        """
+        lines, legends = [], []
+        for i, (tag, _, color), acc in enumerate(groups):
+            acc_mean = np.array([np.mean(accs[i][n_val]) for n_val in n_vals])*100
+            acc_std = np.array([np.std(accs[i][n_val]) for n_val in n_vals])*100
+            h, = ax.plot(n_vals, acc_mean, color=color)
+            ax.fill_between(n_vals, acc_mean-acc_std, acc_mean+acc_std, color=color, alpha=0.2)
+            lines.append(h)
+            legends.append(tag)
+        ax.legend(lines, legends)
+        ax.set_xlabel(f'{n_type} noise level')
+        ax.set_ylabel('accuracy (%)')
+        ax.set_ylim([0, 100])
+        ax.grid(axis='y')
 
 
 if __name__=='__main__':
