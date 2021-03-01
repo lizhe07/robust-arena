@@ -168,6 +168,41 @@ class CorruptionJob(BaseJob):
             accs[corruption] = np.array(accs[corruption])
         return accs
 
+    def plot_comparison(self, ax, groups, accs):
+        r"""Plots comparison of groups.
+
+        Args
+        ----
+        ax: matplot axis
+            The axis for plotting.
+        groups: list
+            Each item is a tuple of `(tag, model_pths, color)`. `tag` is the
+            label for the group, `model_pths` is the list of model pths and
+            `color` is a color tuple of shape `(3,)`.
+        accs: list
+            Each item is a dictionary returned by `summarize`.
+
+        """
+        bin_width = 0.8/len(groups)
+        bars, legends = [], []
+        for i, (tag, _, color), acc in enumerate(groups):
+            acc_mean = np.array([np.mean(accs[i][c]) for c in CORRUPTIONS])*100
+            acc_std = np.array([np.std(accs[i][c]) for c in CORRUPTIONS])*100
+            h = ax.bar(
+                np.arange(len(CORRUPTIONS))+(i-0.5*(len(groups)-1))*bin_width,
+                acc_mean, width=bin_width, yerr=acc_std, zorder=2, facecolor=color,
+                )
+            h.errorbar.get_children()[0].set_edgecolor(np.array(color)*0.6)
+            bars.append(h)
+            legends.append(tag)
+        ax.legend(bars, legends)
+        ax.set_xticks(np.arange(len(CORRUPTIONS)))
+        ax.set_xticklabels(CORRUPTIONS, rotation=90)
+        ax.set_ylabel('accuracy (%)')
+        ax.set_ylim([0, 100])
+        ax.grid(axis='y')
+
+
 if __name__=='__main__':
     parser = job_parser()
     parser.add_argument('--store_dir', default='store')
