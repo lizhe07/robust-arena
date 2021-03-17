@@ -15,7 +15,6 @@ from jarvis.vision import prepare_datasets
 from jarvis.utils import job_parser, get_seed, set_seed, time_str
 
 from . import DEVICE, WORKER_NUM
-BATCH_SIZE = 20
 
 METRICS = ['L2', 'LI']
 NAMES = ['PGD', 'BI', 'DF', 'BB']
@@ -52,6 +51,7 @@ class AttackJob(BaseJob):
         The worker number for data loader.
 
     """
+    BATCH_SIZE = 20
 
     def __init__(self, store_dir, datasets_dir, device=DEVICE, worker_num=WORKER_NUM):
         if store_dir is None:
@@ -116,8 +116,8 @@ class AttackJob(BaseJob):
 
         """
         images, labels = [], []
-        idx_min = BATCH_SIZE*batch_idx
-        idx_max = min(BATCH_SIZE*(batch_idx+1), len(dataset))
+        idx_min = AttackJob.BATCH_SIZE*batch_idx
+        idx_max = min(AttackJob.BATCH_SIZE*(batch_idx+1), len(dataset))
         for idx in range(idx_min, idx_max):
             image, label = dataset[idx]
             images.append(image)
@@ -156,7 +156,7 @@ class AttackJob(BaseJob):
         attack = ATTACKS[config['metric']][config['name']]
         if config['name']=='BB':
             init_attack = fb.attacks.DatasetAttack()
-            loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=AttackJob.BATCH_SIZE)
             for _images, _ in loader:
                 init_attack.feed(fmodel, ep.astensor(_images.to(self.device)))
             attack.init_attack = init_attack
