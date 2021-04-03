@@ -15,6 +15,7 @@ from jarvis.vision import prepare_datasets
 from jarvis.utils import job_parser, get_seed, set_seed, time_str
 
 from . import DEVICE, WORKER_NUM
+BATCH_SIZE = 20
 
 METRICS = ['L2', 'LI']
 NAMES = ['PGD', 'BI', 'DF', 'BB']
@@ -45,20 +46,23 @@ class AttackJob(BaseJob):
         external storage is used.
     datasets_dir: str
         The directory for vision datasets.
+    batch_size: int
+        The batch size for attacks.
     device: str
         The device for computation.
     worker_num: int
         The worker number for data loader.
 
     """
-    BATCH_SIZE = 20
 
-    def __init__(self, store_dir, datasets_dir, device=DEVICE, worker_num=WORKER_NUM):
+    def __init__(self, store_dir, datasets_dir, batch_size=BATCH_SIZE,
+                 device=DEVICE, worker_num=WORKER_NUM):
         if store_dir is None:
             super(AttackJob, self).__init__()
         else:
             super(AttackJob, self).__init__(os.path.join(store_dir, 'attacks'))
         self.datasets_dir = datasets_dir
+        self.batch_size = batch_size
         self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
         self.worker_num = worker_num
 
@@ -100,7 +104,7 @@ class AttackJob(BaseJob):
         dataset: Dataset
             The testing set.
         batch_idx: int
-            The index of the batch to attack. Batch size is `BATCH_SIZE`.
+            The index of the batch to attack.
         targeted: bool
             Whether the attack is targeted.
         targets_pth: str
@@ -116,8 +120,8 @@ class AttackJob(BaseJob):
 
         """
         images, labels = [], []
-        idx_min = AttackJob.BATCH_SIZE*batch_idx
-        idx_max = min(AttackJob.BATCH_SIZE*(batch_idx+1), len(dataset))
+        idx_min = self.batch_size*batch_idx
+        idx_max = min(self.batch_size*(batch_idx+1), len(dataset))
         for idx in range(idx_min, idx_max):
             image, label = dataset[idx]
             images.append(image)
@@ -156,7 +160,7 @@ class AttackJob(BaseJob):
         attack = ATTACKS[config['metric']][config['name']]
         if config['name']=='BB':
             init_attack = fb.attacks.DatasetAttack()
-            loader = torch.utils.data.DataLoader(dataset, batch_size=AttackJob.BATCH_SIZE)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=self.batch_size)
             for _images, _ in loader:
                 init_attack.feed(fmodel, ep.astensor(_images.to(self.device)))
             attack.init_attack = init_attack
@@ -370,6 +374,7 @@ if __name__=='__main__':
     parser = job_parser()
     parser.add_argument('--store_dir', default='store')
     parser.add_argument('--datasets_dir', default='vision_datasets')
+    parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
     parser.add_argument('--max_seed', default=4, type=int)
