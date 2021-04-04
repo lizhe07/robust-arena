@@ -152,17 +152,6 @@ class AttackJob(BaseJob):
             kwargs['grayscale'] = saved['grayscale']
         dataset = prepare_datasets(**kwargs)
 
-        # initialize attack
-        attack = ATTACKS[config['metric']][config['name']]
-        if config['name']=='BB':
-            init_attack = fb.attacks.DatasetAttack()
-            loader = torch.utils.data.DataLoader(dataset, batch_size=AttackJob.BATCH_SIZE)
-            for _images, _ in loader:
-                init_attack.feed(fmodel, ep.astensor(_images.to(self.device)))
-            attack.init_attack = init_attack
-            if verbose:
-                print('dataset attack prepared as initial attack')
-
         # prepare batch for attack
         if config['targeted']:
             targets_pth = '{}/{}_targets.npy'.format(self.datasets_dir, saved['task'])
@@ -172,6 +161,21 @@ class AttackJob(BaseJob):
             dataset, config['batch_idx'], config['targeted'], targets_pth,
             )
 
+        # initialize attack
+        attack = ATTACKS[config['metric']][config['name']]
+        run_kw = {}
+        if config['name']=='BB':
+            init_attack = ATTACKS[config['metric']]['PGD']
+            if config['metric']=='L2':
+                eps_max = images.numpy().size**0.5
+            if config['metric']=='LI':
+                eps_max = 1.
+            _, starting_points, successes = init_attack(
+                fmodel, images, criterion, epsilons=eps_max
+                )
+            assert np.all(successes), "starting points for BB attack not found"
+            run_kw = {'starting_points': starting_points}
+
         # attack model with foolbox
         if verbose:
             tic = time.time()
@@ -179,7 +183,7 @@ class AttackJob(BaseJob):
             eps = None
         else:
             eps = config['eps_level']*EPS_RESOL[config['metric']]
-        _, advs, successes = attack(fmodel, images, criterion, epsilons=eps)
+        _, advs, successes = attack(fmodel, images, criterion, epsilons=eps, **run_kw)
         dists = attack.distance(images, advs)
         advs, successes, dists = advs.numpy(), successes.numpy(), dists.numpy()
         if verbose:
