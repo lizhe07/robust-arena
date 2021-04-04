@@ -163,18 +163,18 @@ class AttackJob(BaseJob):
 
         # initialize attack
         attack = ATTACKS[config['metric']][config['name']]
-        run_kw = {}
+        run_kwargs = {}
         if config['name']=='BB':
             init_attack = ATTACKS[config['metric']]['PGD']
             if config['metric']=='L2':
-                eps_max = images.numpy().size**0.5
+                eps_max = np.prod(images.shape[1:])**0.5
             if config['metric']=='LI':
                 eps_max = 1.
             _, starting_points, successes = init_attack(
                 fmodel, images, criterion, epsilons=eps_max
                 )
-            assert np.all(successes), "starting points for BB attack not found"
-            run_kw = {'starting_points': starting_points}
+            assert np.all(successes.numpy()), "starting points for BB attack not found"
+            run_kwargs = {'starting_points': starting_points}
 
         # attack model with foolbox
         if verbose:
@@ -183,7 +183,7 @@ class AttackJob(BaseJob):
             eps = None
         else:
             eps = config['eps_level']*EPS_RESOL[config['metric']]
-        _, advs, successes = attack(fmodel, images, criterion, epsilons=eps, **run_kw)
+        _, advs, successes = attack(fmodel, images, criterion, epsilons=eps, **run_kwargs)
         dists = attack.distance(images, advs)
         advs, successes, dists = advs.numpy(), successes.numpy(), dists.numpy()
         if verbose:
