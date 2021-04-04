@@ -393,6 +393,6 @@ if __name__=='__main__':
             search_spec = pickle.load(f)
 
     job = AttackJob(
-        args.store_dir, args.datasets_dir, args.batch_size, args.device, args.worker_num
+        args.store_dir, args.datasets_dir, args.device, args.worker_num
         )
     job.random_search(search_spec, args.process_num, args.max_wait, args.tolerance)
