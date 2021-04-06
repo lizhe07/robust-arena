@@ -67,7 +67,7 @@ class EinMonDataset(torch.utils.data.Dataset):
         img_mix = np.real(ifft2(f_mix))
         img_mix = np.clip(img_mix, 0, 1)
 
-        return torch.tensor(img_mix), label_low, label_high
+        return torch.tensor(img_mix, dtype=torch.float), label_low, label_high
 
 
 class EinMonJob(BaseJob):
