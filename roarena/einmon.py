@@ -7,14 +7,67 @@ Created on Sun Feb 28 00:01:54 2021
 
 import os, argparse, pickle, torch
 import numpy as np
-from torchvision.transforms.functional import rgb_to_grayscale
+from scipy.fft import fft2, ifft2
 
 from jarvis import BaseJob
-from jarvis.utils import job_parser
+from jarvis.vision import prepare_datasets
+from jarvis.utils import get_seed, set_seed, job_parser
 
 from . import DEVICE, BATCH_SIZE, WORKER_NUM
 
 ALPHAS = [0.05*i for i in range(20)]
+
+
+class EinMonDataset(torch.utils.data.Dataset):
+
+    def __init__(self, dataset, alpha=0.05, seed=0):
+        self.dataset = dataset
+
+        set_seed(seed)
+        labels_low = np.array(dataset.targets)
+        labels_high = labels_low.copy()
+        last = len(dataset)
+        while True:
+            idxs, = np.nonzero(labels_high==labels_low)
+            if idxs.size>0:
+                if idxs.size<last:
+                    labels_high[idxs[np.random.permutation(idxs.size)]] = labels_high[idxs]
+                    last = idxs.size
+                else:
+                    labels_high = labels_low.copy()[np.random.permutation(len(dataset))]
+                    last = len(dataset)
+            else:
+                break
+
+        idxs_low, idxs_high = np.arange(len(dataset)), np.arange(len(dataset))
+        for c in range(len(dataset.classes)):
+            _idxs, = np.nonzero(labels_low==c)
+            idxs_high[labels_high==c] = np.random.permutation(_idxs)
+
+        self.idxs_low, self.idxs_high = idxs_low, idxs_high
+
+        img, _ = dataset[0]
+        img_size = img.shape[1]
+        assert img.shape[2]==img_size
+        dx, dy = np.meshgrid(np.arange(img_size)/img_size, np.arange(img_size)/img_size)
+        dx = np.mod(dx+0.5, 1)-0.5
+        dy = np.mod(dy+0.5, 1)-0.5
+        self.mask = ((dx**2+dy**2)**0.5<=alpha*0.5).astype(float)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        img_low, label_low = self.dataset[self.idxs_low[idx]]
+        img_high, label_high = self.dataset[self.idxs_high[idx]]
+
+        f_low = fft2(img_low.numpy())
+        f_high = fft2(img_high.numpy())
+        f_mix = f_low*self.mask+f_high*(1-self.mask)
+        img_mix = np.real(ifft2(f_mix))
+        img_mix = np.clip(img_mix, 0, 1)
+
+        return torch.tensor(img_mix), label_low, label_high
 
 
 class EinMonJob(BaseJob):
@@ -30,7 +83,7 @@ class EinMonJob(BaseJob):
         self.batch_size = batch_size
         self.worker_num = worker_num
 
-    def prepare_dataset(self, task, alpha, grayscale=False):
+    def prepare_dataset(self, task, alpha, seed, grayscale=False):
         r"""Prepares the Einstein-Monroe dataset.
 
         Existing datasets that mix CIFAR images with different mixing
@@ -54,16 +107,9 @@ class EinMonJob(BaseJob):
             low-frequency and high-frequency component.
 
         """
-        with open('{}/{}-EM/alpha_{:02d}.pickle'.format(
-                self.datasets_dir, task, int(100*alpha),
-                ), 'rb') as f:
-            saved = pickle.load(f)
-        images = torch.tensor(saved['images_mix'], dtype=torch.float)
-        if grayscale:
-            images = rgb_to_grayscale(images)
-        labels_low = torch.tensor(saved['labels_low'], dtype=torch.long)
-        labels_high = torch.tensor(saved['labels_high'], dtype=torch.long)
-        dataset = torch.utils.data.TensorDataset(images, labels_low, labels_high)
+        dataset = EinMonDataset(
+            prepare_datasets(task, self.datasets_dir), alpha=alpha, seed=seed,
+            )
         return dataset
 
     def evaluate(self, model, dataset):
@@ -110,6 +156,7 @@ class EinMonJob(BaseJob):
         parser = argparse.ArgumentParser()
 
         parser.add_argument('--model_pth')
+        parser.add_argument('--seed', default=0, type=int)
         parser.add_argument('--alpha', default=0.05, type=float, choices=ALPHAS)
 
         args = parser.parse_args(arg_strs)
@@ -117,6 +164,7 @@ class EinMonJob(BaseJob):
         assert args.model_pth is not None
         return {
             'model_pth': args.model_pth,
+            'seed': get_seed(args.seed),
             'alpha': args.alpha,
             }
 
@@ -130,7 +178,7 @@ class EinMonJob(BaseJob):
 
         # prepare Einstein-Monroe dataset
         dataset = self.prepare_dataset(
-            saved['task'], config['alpha'],
+            saved['task'], config['alpha'], config['seed'],
             grayscale=saved['grayscale'] if 'grayscale' in saved else False,
             )
 
