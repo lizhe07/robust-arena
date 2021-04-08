@@ -7,10 +7,12 @@ Created on Thu Sep 10 16:39:55 2020
 
 import os, argparse, pickle, torch
 import numpy as np
+from torchvision import transforms
+from torchvision.datasets import ImageFolder
 from torchvision.transforms.functional import rgb_to_grayscale
 
 from jarvis import BaseJob
-from jarvis.vision import evaluate
+from jarvis.vision import evaluate, IMAGENET_TEST
 from jarvis.utils import job_parser
 
 from . import DEVICE, BATCH_SIZE, WORKER_NUM
@@ -94,24 +96,32 @@ class CorruptionJob(BaseJob):
             The dataset containing corrupted images and class labels.
 
         """
-        assert task in ['CIFAR10', 'CIFAR100']
-        if task=='CIFAR10':
-            npy_dir = os.path.join(self.datasets_dir, 'CIFAR-10-C')
-        if task=='CIFAR100':
-            npy_dir = os.path.join(self.datasets_dir, 'CIFAR-100-C')
+        if task in ['CIFAR10', 'CIFAR100']:
+            if task=='CIFAR10':
+                npy_dir = os.path.join(self.datasets_dir, 'CIFAR-10-C')
+            if task=='CIFAR100':
+                npy_dir = os.path.join(self.datasets_dir, 'CIFAR-100-C')
 
-        images = np.load(os.path.join(npy_dir, f'{corruption}.npy'))/255.
-        images = torch.tensor(
-            images[(severity-1)*10000:severity*10000], dtype=torch.float
-            ).permute(0, 3, 1, 2)
-        if grayscale:
-            images = rgb_to_grayscale(images)
-        labels = torch.tensor(
-            np.load(os.path.join(npy_dir, 'labels.npy'))[:10000], dtype=torch.long
-            )
-        dataset = torch.utils.data.TensorDataset(images, labels)
+            images = np.load(os.path.join(npy_dir, f'{corruption}.npy'))/255.
+            images = torch.tensor(
+                images[(severity-1)*10000:severity*10000], dtype=torch.float
+                ).permute(0, 3, 1, 2)
+            if grayscale:
+                images = rgb_to_grayscale(images)
+            labels = torch.tensor(
+                np.load(os.path.join(npy_dir, 'labels.npy'))[:10000], dtype=torch.long
+                )
+            dataset = torch.utils.data.TensorDataset(images, labels)
+        if task=='ImageNet':
+            if grayscale:
+                t_test = [transforms.Grayscale(), transforms.ToTensor()]
+            else:
+                t_test = [transforms.ToTensor()]
+            dataset = ImageFolder(
+                os.path.join(self.datasets_dir, 'ImageNet-C', corruption, str(severity)),
+                transform = transforms.Compose(IMAGENET_TEST+t_test)
+                )
         return dataset
-
 
     def main(self, config, verbose=True):
         if verbose:
