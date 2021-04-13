@@ -217,14 +217,14 @@ class EinMonJob(BaseJob):
             accs_low[alpha] = []
             accs_high[alpha] = []
             for model_pth in model_pths:
-                config = {
+                cond = {
                     'model_pth': model_pth,
                     'alpha': alpha,
                     }
-                key = self.configs.get_key(config)
-                if key is not None and self.is_completed(key):
-                    accs_low[alpha].append(self.results[key]['acc_low'])
-                    accs_high[alpha].append(self.results[key]['acc_high'])
+                for key, _ in self.conditioned(cond):
+                    result = self.results[key]
+                    accs_low[alpha].append(result['acc_low'])
+                    accs_high[alpha].append(result['acc_high'])
             accs_low[alpha] = np.array(accs_low[alpha])
             accs_high[alpha] = np.array(accs_high[alpha])
         return accs_low, accs_high
@@ -284,6 +284,7 @@ if __name__=='__main__':
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
+    parser.add_argument('--max_seed', default=4, type=int)
     args = parser.parse_args()
 
     if args.spec_pth is None:
@@ -291,6 +292,7 @@ if __name__=='__main__':
         assert os.path.exists(export_dir), "directory of exported models not found"
         search_spec = {
             'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')],
+            'seed': list(range(args.max_seed)),
             'alpha': ALPHAS,
             }
     else:
