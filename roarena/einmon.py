@@ -15,12 +15,12 @@ from jarvis.utils import get_seed, set_seed, job_parser
 
 from . import DEVICE, BATCH_SIZE, WORKER_NUM
 
-ALPHAS = [0.05*i for i in range(20)]
+ALPHAS = [5*i for i in range(20)]
 
 
 class EinMonDataset(torch.utils.data.Dataset):
 
-    def __init__(self, dataset, alpha=0.05, seed=0):
+    def __init__(self, dataset, alpha=5, seed=0):
         self.dataset = dataset
 
         set_seed(seed)
@@ -52,7 +52,7 @@ class EinMonDataset(torch.utils.data.Dataset):
         dx, dy = np.meshgrid(np.arange(img_size)/img_size, np.arange(img_size)/img_size)
         dx = np.mod(dx+0.5, 1)-0.5
         dy = np.mod(dy+0.5, 1)-0.5
-        self.mask = ((dx**2+dy**2)**0.5<=alpha*0.5).astype(float)
+        self.mask = ((dx**2+dy**2)**0.5<=alpha/100*0.5).astype(float)
 
     def __len__(self):
         return len(self.dataset)
@@ -94,8 +94,8 @@ class EinMonJob(BaseJob):
         task: str
             The name of the dataset, only supports ``'CIFAR10'`` and
             ``'CIFAR100'`` for now.
-        alpha: float
-            The normalized mixing frequency.
+        alpha: int
+            The normalized mixing frequency, an integeger from 0 to 100.
         grayscale: bool
             Whether use grayscale CIFAR images.
 
@@ -156,8 +156,10 @@ class EinMonJob(BaseJob):
         parser = argparse.ArgumentParser()
 
         parser.add_argument('--model_pth')
-        parser.add_argument('--seed', default=0, type=int)
-        parser.add_argument('--alpha', default=0.05, type=float, choices=ALPHAS)
+        parser.add_argument('--seed', default=0, type=int,
+                            help="random seed")
+        parser.add_argument('--alpha', default=5, type=int,
+                            help="mixing ratio, an integer from 0 to 100")
 
         args = parser.parse_args(arg_strs)
 
