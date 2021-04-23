@@ -177,7 +177,7 @@ class AttackJob(BaseJob):
             _, starting_points, successes = init_attack(
                 fmodel, images, criterion, epsilons=eps_max
                 )
-            assert np.all(successes.numpy()), "starting points for BB attack not found"
+            assert torch.all(successes), "starting points for BB attack not found"
             run_kwargs = {'starting_points': starting_points}
 
         # attack model with foolbox
