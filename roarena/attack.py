@@ -189,9 +189,11 @@ class AttackJob(BaseJob):
             eps = config['eps_level']*EPS_RESOL[config['metric']]
         _, advs, successes = attack(fmodel, images, criterion, epsilons=eps, **run_kwargs)
         dists = attack.distance(images, advs)
-        advs, successes, dists = advs.numpy().copy(), successes.numpy().copy(), dists.numpy().copy()
+        advs = advs.cpu().numpy().copy()
+        successes = successes.cpu().numpy().copy()
+        dists = dists.cpu().numpy().copy()
 
-        images = images.raw.data.cpu().numpy()
+        images = images.cpu().numpy()
         predicts, labels = predicts.cpu().numpy(), labels.cpu().numpy()
         idxs, = (predicts!=labels).nonzero()
         advs[idxs] = images[idxs]
