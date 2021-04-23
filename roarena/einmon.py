@@ -108,7 +108,8 @@ class EinMonJob(BaseJob):
 
         """
         dataset = EinMonDataset(
-            prepare_datasets(task, self.datasets_dir), alpha=alpha, seed=seed,
+            prepare_datasets(task, self.datasets_dir, grayscale=grayscale),
+            alpha=alpha, seed=seed,
             )
         return dataset
 
