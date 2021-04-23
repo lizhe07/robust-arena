@@ -122,18 +122,18 @@ class AttackJob(BaseJob):
             image, label = dataset[idx]
             images.append(image)
             labels.append(torch.tensor(label, dtype=torch.long))
-        images, labels = torch.stack(images), torch.stack(labels)
-        images = ep.astensor(images.to(self.device))
+        images = torch.stack(images).to(self.device)
+        labels = torch.stack(labels).to(self.device)
         if targeted:
+            # TODO: generate false targets on the fly
             targets = np.load(targets_pth)[idx_min:idx_max]
             targets = torch.tensor(targets, dtype=torch.long)
             assert not np.any(targets.numpy()==labels.numpy())
             targets = ep.astensor(targets.to(self.device))
             criterion = fb.criteria.TargetedMisclassification(targets)
         else:
-            labels = ep.astensor(labels.to(self.device))
             criterion = fb.criteria.Misclassification(labels)
-        return images, criterion
+        return images, labels, criterion
 
     def main(self, config, verbose=True):
         if verbose:
@@ -157,9 +157,13 @@ class AttackJob(BaseJob):
             targets_pth = '{}/{}_targets.npy'.format(self.datasets_dir, saved['task'])
         else:
             targets_pth = None
-        images, criterion = self.prepare_batch(
+        images, labels, criterion = self.prepare_batch(
             dataset, config['batch_idx'], config['targeted'], targets_pth,
             )
+        with torch.no_grad():
+            logits = model(images)
+            _, predicts = logits.max(dim=1)
+        # images = ep.astensor(images)
 
         # initialize attack
         attack = ATTACKS[config['metric']][config['name']]
@@ -185,7 +189,15 @@ class AttackJob(BaseJob):
             eps = config['eps_level']*EPS_RESOL[config['metric']]
         _, advs, successes = attack(fmodel, images, criterion, epsilons=eps, **run_kwargs)
         dists = attack.distance(images, advs)
-        advs, successes, dists = advs.numpy(), successes.numpy(), dists.numpy()
+        advs, successes, dists = advs.numpy().copy(), successes.numpy().copy(), dists.numpy().copy()
+
+        images = images.raw.data.cpu().numpy()
+        predicts, labels = predicts.cpu().numpy(), labels.cpu().numpy()
+        idxs, = (predicts!=labels).nonzero()
+        advs[idxs] = images[idxs]
+        successes[idxs] = True
+        dists[idxs] = 0.
+
         if verbose:
             toc = time.time()
             if eps is None:
@@ -197,14 +209,37 @@ class AttackJob(BaseJob):
 
         result = {
             'advs': advs,
+            'predicts': predicts,
+            'labels': labels,
             'successes': successes,
             'dists': dists,
             }
         preview = {
+            'predicts': predicts,
+            'labels': labels,
             'successes': successes,
             'dists': dists,
             }
         return result, preview
+
+    def best_attack(self, model_pth, sample_idx, metric='L2', targeted=False):
+        batch_idx = sample_idx//AttackJob.BATCH_SIZE
+        sample_idx = sample_idx%AttackJob.BATCH_SIZE
+        cond = {
+            'model_pth': model_pth,
+            'metric': metric,
+            'targeted': targeted,
+            'eps_level': None,
+            'batch_idx': batch_idx,
+            }
+        min_dist, best_adv = None, None
+        for key, config in self.conditioned(cond):
+            result = self.results[key]
+            _dists, _advs = result['dists'], result['advs']
+            if min_dist is None or min_dist>_dists[sample_idx]:
+                min_dist = _dists[sample_idx]
+                best_adv = _advs[sample_idx].copy()
+        return best_adv
 
     def pool_results(self, model_pth, metric='L2', targeted=False, eps=None, *,
                      max_batch_num=None, preview_only=False):
@@ -280,13 +315,18 @@ class AttackJob(BaseJob):
             if max_batch_num is not None and len(batch_idxs)==max_batch_num:
                 break
         if batch_idxs:
+            sample_idxs = []
+            for batch_idx in batch_idxs:
+                idx_min = AttackJob.BATCH_SIZE*batch_idx
+                idx_max = idx_min+len(successes[batch_idx])
+                sample_idxs += list(range(idx_min, idx_max))
             successes = np.concatenate([successes[batch_idx] for batch_idx in batch_idxs])
             dists = np.concatenate([dists[batch_idx] for batch_idx in batch_idxs])
             if preview_only:
                 advs = None
             else:
                 advs = np.concatenate([advs[batch_idx] for batch_idx in batch_idxs])
-            return batch_idxs, successes, dists, advs
+            return sample_idxs, successes, dists, advs
         else:
             raise RuntimeError(f"no results found for {model_pth}")
 
