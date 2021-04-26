@@ -12,7 +12,7 @@ import foolbox as fb
 
 from jarvis import BaseJob
 from jarvis.vision import prepare_datasets
-from jarvis.utils import job_parser, get_seed, set_seed, time_str
+from jarvis.utils import job_parser, get_seed, set_seed, time_str, get_cuda_version
 
 from . import DEVICE, WORKER_NUM
 
@@ -70,6 +70,8 @@ class AttackJob(BaseJob):
         parser.add_argument('--metric', default='L2', choices=METRICS)
         parser.add_argument('--name', default='BB', choices=NAMES)
         parser.add_argument('--targeted', action='store_true')
+        parser.add_argument('--shuffle_mode', choices=['elm', 'cls'])
+        parser.add_argument('--shuffle_seed', default=0, type=int)
         parser.add_argument('--eps', type=float)
         parser.add_argument('--batch_idx', default=0, type=int)
 
@@ -82,7 +84,7 @@ class AttackJob(BaseJob):
         else:
             eps_level = int(args.eps/EPS_RESOL[args.metric])
             assert eps_level>0
-        return {
+        config = {
             'model_pth': args.model_pth,
             'seed': get_seed(args.seed),
             'metric': args.metric,
@@ -91,8 +93,14 @@ class AttackJob(BaseJob):
             'eps_level': eps_level,
             'batch_idx': args.batch_idx,
             }
+        if args.targeted:
+            config.update({
+                'shuffle_mode': args.shuffle_mode,
+                'shuffle_seed': args.shuffle_seed,
+                })
+        return config
 
-    def prepare_batch(self, dataset, batch_idx, targeted, targets_pth=None):
+    def prepare_batch(self, dataset, batch_idx, targeted, shuffle_mode='elm', shuffle_seed=0, **kwargs):
         r"""Prepares an image batch and the attack criterion.
 
         Args
@@ -125,8 +133,31 @@ class AttackJob(BaseJob):
         images = torch.stack(images).to(self.device)
         labels = torch.stack(labels).to(self.device)
         if targeted:
-            # TODO: generate false targets on the fly
-            targets = np.load(targets_pth)[idx_min:idx_max]
+            set_seed(shuffle_seed)
+            labels = np.array(dataset.targets)
+            if shuffle_mode=='elm':
+                last = labels.size
+                targets = np.random.permutation(labels)
+                while True:
+                    idxs, = np.nonzero(targets==labels)
+                    if idxs.size>0:
+                        if idxs.size<last:
+                            last = idxs.size
+                            targets[np.random.permutation(idxs)] = targets[idxs]
+                        else:
+                            last = labels.size
+                            targets = np.random.permutation(labels)
+                    else:
+                        break
+            if shuffle_mode=='cls':
+                _labels = np.unique(labels)
+                while True:
+                    _targets = np.random.permutation(_labels)
+                    if np.all(_targets!=_labels):
+                        break
+                targets = labels.copy()
+                for _t, _l in zip(_targets, _labels):
+                    targets[labels==_l] = _t
             targets = torch.tensor(targets, dtype=torch.long)
             assert not np.any(targets.numpy()==labels.numpy())
             targets = ep.astensor(targets.to(self.device))
@@ -137,8 +168,8 @@ class AttackJob(BaseJob):
 
     def main(self, config, verbose=True):
         if verbose:
+            print('CUDA {}'.format(get_cuda_version()))
             print(config)
-        set_seed(config['seed'])
 
         # load model
         saved = torch.load(config['model_pth'])
@@ -153,19 +184,13 @@ class AttackJob(BaseJob):
         dataset = prepare_datasets(**kwargs)
 
         # prepare batch for attack
-        if config['targeted']:
-            targets_pth = '{}/{}_targets.npy'.format(self.datasets_dir, saved['task'])
-        else:
-            targets_pth = None
-        images, labels, criterion = self.prepare_batch(
-            dataset, config['batch_idx'], config['targeted'], targets_pth,
-            )
+        images, labels, criterion = self.prepare_batch(dataset, **config)
         with torch.no_grad():
             logits = model(images)
             _, predicts = logits.max(dim=1)
-        # images = ep.astensor(images)
 
         # initialize attack
+        set_seed(config['seed'])
         attack = ATTACKS[config['metric']][config['name']]
         run_kwargs = {}
         if config['name']=='BB':
