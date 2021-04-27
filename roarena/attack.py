@@ -158,9 +158,10 @@ class AttackJob(BaseJob):
                 targets = labels.copy()
                 for _t, _l in zip(_targets, _labels):
                     targets[labels==_l] = _t
-            targets = torch.tensor(targets, dtype=torch.long)
-            assert not np.any(targets.numpy()==labels.numpy())
-            targets = ep.astensor(targets.to(self.device))
+            assert not np.any(targets==labels)
+            targets = ep.astensor(torch.tensor(
+                targets, dtype=torch.long, device=self.device,
+                ))
             criterion = fb.criteria.TargetedMisclassification(targets)
         else:
             criterion = fb.criteria.Misclassification(labels)
