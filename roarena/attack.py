@@ -131,7 +131,6 @@ class AttackJob(BaseJob):
             images.append(image)
             labels.append(torch.tensor(label, dtype=torch.long))
         images = torch.stack(images).to(self.device)
-        labels = torch.stack(labels).to(self.device)
         if targeted:
             set_seed(shuffle_seed)
             labels = np.array(dataset.targets)
@@ -160,10 +159,11 @@ class AttackJob(BaseJob):
                     targets[labels==_l] = _t
             assert not np.any(targets==labels)
             targets = torch.tensor(
-                targets, dtype=torch.long, device=self.device,
+                targets[idx_min:idx_max], dtype=torch.long, device=self.device,
                 )
             criterion = fb.criteria.TargetedMisclassification(targets)
         else:
+            labels = torch.stack(labels).to(self.device)
             criterion = fb.criteria.Misclassification(labels)
         return images, labels, criterion
 
