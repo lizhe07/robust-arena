@@ -7,12 +7,11 @@ Created on Thu Sep 10 20:57:18 2020
 
 import os, argparse, pickle, time, torch
 import numpy as np
-import eagerpy as ep
 import foolbox as fb
 
 from jarvis import BaseJob
 from jarvis.vision import prepare_datasets
-from jarvis.utils import job_parser, get_seed, set_seed, time_str, get_cuda_version
+from jarvis.utils import job_parser, get_seed, set_seed, time_str
 
 from . import DEVICE, WORKER_NUM
 
