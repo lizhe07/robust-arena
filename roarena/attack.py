@@ -70,7 +70,7 @@ class AttackJob(BaseJob):
         parser.add_argument('--metric', default='L2', choices=METRICS)
         parser.add_argument('--name', default='BB', choices=NAMES)
         parser.add_argument('--targeted', action='store_true')
-        parser.add_argument('--shuffle_mode', choices=['elm', 'cls'])
+        parser.add_argument('--shuffle_mode', default='elm', choices=['elm', 'cls'])
         parser.add_argument('--shuffle_seed', default=0, type=int)
         parser.add_argument('--eps', type=float)
         parser.add_argument('--batch_idx', default=0, type=int)
@@ -168,7 +168,7 @@ class AttackJob(BaseJob):
 
     def main(self, config, verbose=True):
         if verbose:
-            print('CUDA {}'.format(get_cuda_version()))
+            # print('CUDA {}'.format(get_cuda_version()))
             print(config)
 
         # load model
