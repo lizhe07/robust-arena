@@ -131,39 +131,39 @@ class AttackJob(BaseJob):
             images.append(image)
             labels.append(torch.tensor(label, dtype=torch.long))
         images = torch.stack(images).to(self.device)
+        labels = torch.stack(labels).to(self.device)
         if targeted:
             set_seed(shuffle_seed)
-            labels = np.array(dataset.targets)
+            labels_all = np.array(dataset.targets)
             if shuffle_mode=='elm':
-                last = labels.size
-                targets = np.random.permutation(labels)
+                last = labels_all.size
+                targets = np.random.permutation(labels_all)
                 while True:
-                    idxs, = np.nonzero(targets==labels)
+                    idxs, = np.nonzero(targets==labels_all)
                     if idxs.size>0:
                         if idxs.size<last:
                             last = idxs.size
                             targets[np.random.permutation(idxs)] = targets[idxs]
                         else:
-                            last = labels.size
-                            targets = np.random.permutation(labels)
+                            last = labels_all.size
+                            targets = np.random.permutation(labels_all)
                     else:
                         break
             if shuffle_mode=='cls':
-                _labels = np.unique(labels)
+                _labels = np.unique(labels_all)
                 while True:
                     _targets = np.random.permutation(_labels)
                     if np.all(_targets!=_labels):
                         break
-                targets = labels.copy()
+                targets = labels_all.copy()
                 for _t, _l in zip(_targets, _labels):
-                    targets[labels==_l] = _t
-            assert not np.any(targets==labels)
+                    targets[labels_all==_l] = _t
+            assert not np.any(targets==labels_all)
             targets = torch.tensor(
                 targets[idx_min:idx_max], dtype=torch.long, device=self.device,
                 )
             criterion = fb.criteria.TargetedMisclassification(targets)
         else:
-            labels = torch.stack(labels).to(self.device)
             criterion = fb.criteria.Misclassification(labels)
         return images, labels, criterion
 
