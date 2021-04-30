@@ -5,7 +5,7 @@ Created on Thu Sep 10 20:57:18 2020
 @author: Zhe
 """
 
-import os, argparse, pickle, time, torch
+import os, argparse, pickle, random, time, torch
 import numpy as np
 import foolbox as fb
 
@@ -70,7 +70,7 @@ class AttackJob(BaseJob):
         parser.add_argument('--name', default='BB', choices=NAMES)
         parser.add_argument('--targeted', action='store_true')
         parser.add_argument('--shuffle_mode', default='elm', choices=['elm', 'cls'])
-        parser.add_argument('--shuffle_seed', default=0, type=int)
+        parser.add_argument('--shuffle_tag', default=0, type=int)
         parser.add_argument('--eps', type=float)
         parser.add_argument('--batch_idx', default=0, type=int)
 
@@ -95,11 +95,11 @@ class AttackJob(BaseJob):
         if args.targeted:
             config.update({
                 'shuffle_mode': args.shuffle_mode,
-                'shuffle_seed': args.shuffle_seed,
+                'shuffle_tag': args.shuffle_tag,
                 })
         return config
 
-    def prepare_batch(self, dataset, batch_idx, targeted, shuffle_mode='elm', shuffle_seed=0, **kwargs):
+    def prepare_batch(self, dataset, batch_idx, targeted, shuffle_mode='elm', shuffle_tag=0, **kwargs):
         r"""Prepares an image batch and the attack criterion.
 
         Args
@@ -132,7 +132,7 @@ class AttackJob(BaseJob):
         images = torch.stack(images).to(self.device)
         labels = torch.stack(labels).to(self.device)
         if targeted:
-            set_seed(shuffle_seed)
+            set_seed(shuffle_tag)
             labels_all = np.array(dataset.targets)
             if shuffle_mode=='elm':
                 last = labels_all.size
@@ -166,6 +166,29 @@ class AttackJob(BaseJob):
             criterion = fb.criteria.Misclassification(labels)
         return images, labels, criterion
 
+    def dataset_attack(self, model, dataset, labels, targeted):
+        model.eval().to(self.device)
+
+        advs = []
+        for label in labels:
+            if targeted:
+                idxs, = np.nonzero(np.array(dataset.targets)==label.item())
+            else:
+                idxs, = np.nonzero(np.array(dataset.targets)!=label.item())
+            while True:
+                image, _ = dataset[random.choice(idxs)]
+                with torch.no_grad():
+                    logit = model(image[None].to(self.device))[0]
+                    _, pred = logit.max(dim=0)
+                if targeted:
+                    is_adv = pred.item()==label.item()
+                else:
+                    is_adv = pred.item()!=label.item()
+                if is_adv:
+                    break
+            advs.append(image)
+        return torch.stack(advs)
+
     def main(self, config, verbose=True):
         if verbose:
             # print('CUDA {}'.format(get_cuda_version()))
@@ -194,15 +217,11 @@ class AttackJob(BaseJob):
         attack = ATTACKS[config['metric']][config['name']]
         run_kwargs = {}
         if config['name']=='BB':
-            init_attack = ATTACKS[config['metric']]['PGD']
-            if config['metric']=='L2':
-                eps_max = np.prod(images.shape[1:])**0.5
-            if config['metric']=='LI':
-                eps_max = 1.
-            _, starting_points, successes = init_attack(
-                fmodel, images, criterion, epsilons=eps_max
-                )
-            assert torch.all(successes), "starting points for BB attack not found"
+            starting_points = self.dataset_attack(
+                model, dataset,
+                criterion.target_classes if config['targeted'] else criterion.classes,
+                config['targeted']
+                ).to(self.device)
             run_kwargs = {'starting_points': starting_points}
 
         # attack model with foolbox
@@ -455,7 +474,7 @@ if __name__=='__main__':
             'seed': list(range(args.max_seed)),
             'metric': METRICS,
             'name': ['BB'],
-            'targeted': [False, True],
+            'targeted': [False],
             'eps': [None],
             'batch_idx': list(range(args.batch_num)),
             }
