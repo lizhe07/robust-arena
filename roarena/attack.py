@@ -219,7 +219,7 @@ class AttackJob(BaseJob):
         if config['name']=='BB':
             starting_points = self.dataset_attack(
                 model, dataset,
-                criterion.target_classes if config['targeted'] else criterion.classes,
+                criterion.target_classes if config['targeted'] else criterion.labels,
                 config['targeted']
                 ).to(self.device)
             run_kwargs = {'starting_points': starting_points}
@@ -268,7 +268,8 @@ class AttackJob(BaseJob):
             }
         return result, preview
 
-    def best_attack(self, model_pth, sample_idx, metric='L2', targeted=False):
+    def best_attack(self, model_pth, sample_idx, metric='L2', targeted=False,
+                    shuffle_mode='elm', shuffle_tag=0):
         batch_idx = sample_idx//AttackJob.BATCH_SIZE
         sample_idx = sample_idx%AttackJob.BATCH_SIZE
         cond = {
@@ -278,6 +279,11 @@ class AttackJob(BaseJob):
             'eps_level': None,
             'batch_idx': batch_idx,
             }
+        if targeted:
+            cond.update({
+                'shuffle_mode': shuffle_mode,
+                'shuffle_tag': shuffle_tag,
+                })
         min_dist, best_adv = None, None
         for key, config in self.conditioned(cond):
             result = self.results[key]
@@ -285,7 +291,7 @@ class AttackJob(BaseJob):
             if min_dist is None or min_dist>_dists[sample_idx]:
                 min_dist = _dists[sample_idx]
                 best_adv = _advs[sample_idx].copy()
-        return best_adv
+        return min_dist, best_adv
 
     def pool_results(self, model_pth, metric='L2', targeted=False, eps=None, *,
                      max_batch_num=None, preview_only=False):
