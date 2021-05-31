@@ -72,6 +72,7 @@ class AttackJob(BaseJob):
         parser.add_argument('--shuffle_mode', default='elm', choices=['elm', 'cls'])
         parser.add_argument('--shuffle_tag', default=0, type=int)
         parser.add_argument('--eps', type=float)
+        parser.add_argument('--overshoot', default=0.01, type=float)
         parser.add_argument('--batch_idx', default=0, type=int)
 
         args, _ = parser.parse_known_args(arg_strs)
@@ -90,6 +91,7 @@ class AttackJob(BaseJob):
             'name': args.name,
             'targeted': args.targeted,
             'eps_level': eps_level,
+            'overshoot': args.overshoot,
             'batch_idx': args.batch_idx,
             }
         if args.targeted:
@@ -99,7 +101,7 @@ class AttackJob(BaseJob):
                 })
         return config
 
-    def prepare_batch(self, dataset, batch_idx, targeted, shuffle_mode='elm', shuffle_tag=0, **kwargs):
+    def prepare_batch(self, dataset, batch_idx, overshoot, targeted, shuffle_mode='elm', shuffle_tag=0, **kwargs):
         r"""Prepares an image batch and the attack criterion.
 
         Args
@@ -161,29 +163,27 @@ class AttackJob(BaseJob):
             targets = torch.tensor(
                 targets[idx_min:idx_max], dtype=torch.long, device=self.device,
                 )
-            criterion = fb.criteria.TargetedMisclassification(targets)
+            criterion = fb.criteria.TargetedMisclassification(targets, overshoot)
         else:
-            criterion = fb.criteria.Misclassification(labels)
+            criterion = fb.criteria.Misclassification(labels, overshoot)
         return images, labels, criterion
 
-    def dataset_attack(self, model, dataset, labels, targeted):
+    def dataset_attack(self, model, dataset, labels, overshoot, targeted):
         model.eval().to(self.device)
 
         advs = []
         for label in labels:
             if targeted:
                 idxs, = np.nonzero(np.array(dataset.targets)==label.item())
+                criterion = fb.criteria.TargetedMisclassification(label[None], overshoot)
             else:
                 idxs, = np.nonzero(np.array(dataset.targets)!=label.item())
+                criterion = fb.criteria.Misclassification(label[None], overshoot)
             while True:
                 image, _ = dataset[random.choice(idxs)]
                 with torch.no_grad():
                     logit = model(image[None].to(self.device))[0]
-                    _, pred = logit.max(dim=0)
-                if targeted:
-                    is_adv = pred.item()==label.item()
-                else:
-                    is_adv = pred.item()!=label.item()
+                is_adv = criterion(image[None], logit[None])[0]
                 if is_adv:
                     break
             advs.append(image)
@@ -220,7 +220,7 @@ class AttackJob(BaseJob):
             starting_points = self.dataset_attack(
                 model, dataset,
                 criterion.target_classes if config['targeted'] else criterion.labels,
-                config['targeted']
+                config['overshoot'], config['targeted'],
                 ).to(self.device)
             run_kwargs = {'starting_points': starting_points}
 
@@ -239,10 +239,6 @@ class AttackJob(BaseJob):
 
         images = images.cpu().numpy()
         predicts, labels = predicts.cpu().numpy(), labels.cpu().numpy()
-        idxs, = (predicts!=labels).nonzero()
-        advs[idxs] = images[idxs]
-        successes[idxs] = True
-        dists[idxs] = 0.
 
         if verbose:
             toc = time.time()
