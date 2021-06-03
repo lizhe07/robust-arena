@@ -14,5 +14,5 @@ setup(
     author='Zhe Li',
     python_requires='>=3',
     packages=find_packages(),
-    install_requires=['torch', 'jarvis', 'eagerpy', 'numba', 'foolbox'],
+    install_requires=['torch', 'jarvis', 'eagerpy', 'numba<0.53', 'foolbox'],
 )
