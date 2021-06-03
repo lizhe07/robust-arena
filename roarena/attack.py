@@ -101,7 +101,8 @@ class AttackJob(BaseJob):
                 })
         return config
 
-    def prepare_batch(self, dataset, batch_idx, overshoot, targeted, shuffle_mode='elm', shuffle_tag=0, **kwargs):
+    def prepare_batch(self, dataset, batch_idx, targeted, overshoot,
+                      shuffle_mode='elm', shuffle_tag=0, **kwargs):
         r"""Prepares an image batch and the attack criterion.
 
         Args
@@ -112,13 +113,16 @@ class AttackJob(BaseJob):
             The index of the batch to attack. Batch size is `BATCH_SIZE`.
         targeted: bool
             Whether the attack is targeted.
-        targets_pth: str
-            The incorrect targets, which is precomputed and saved in a file.
-            It will be ignored when `targeted==False`.
+        overshoot: float
+            The overshoot parameter.
+        shuffle_mode: str
+            The mode of shuffled targets for targeted attack.
+        shuffle_tag: int
+            The integer tag for shuffled targets.
 
         Returns
         -------
-        images: ep tensor,
+        images: tensor
             A batch of images.
         criterion: fb criteria
             The criterion used for foolbox attack.
@@ -168,7 +172,26 @@ class AttackJob(BaseJob):
             criterion = fb.criteria.Misclassification(labels, overshoot)
         return images, labels, criterion
 
-    def dataset_attack(self, model, dataset, labels, overshoot, targeted):
+    def dataset_attack(self, model, dataset, labels, targeted, overshoot):
+        r"""Generates dataset attack.
+
+        Images are randomly selected from the whole dataset as attacks, which
+        serve as the initial point for boundary attack.
+
+        model: nn.Module
+            The model to attack.
+        dataset: Dataset
+            The full dataset.
+        labels: tensor
+            The batch of labels used for generating attacks. If the attack is
+            targeted, `labels` is the targeted labels. If the attack is
+            untargeted, `labels` is the true labels.
+        targeted: bool
+            Whether the attack is targeted.
+        overshoot: float
+            The overshoot parameter.
+
+        """
         model.eval().to(self.device)
 
         advs = []
@@ -191,7 +214,6 @@ class AttackJob(BaseJob):
 
     def main(self, config, verbose=True):
         if verbose:
-            # print('CUDA {}'.format(get_cuda_version()))
             print(config)
 
         # load model
@@ -220,7 +242,7 @@ class AttackJob(BaseJob):
             starting_points = self.dataset_attack(
                 model, dataset,
                 criterion.target_classes if config['targeted'] else criterion.labels,
-                config['overshoot'], config['targeted'],
+                config['targeted'], config['overshoot'],
                 ).to(self.device)
             run_kwargs = {'starting_points': starting_points}
 
@@ -265,7 +287,7 @@ class AttackJob(BaseJob):
         return result, preview
 
     def best_attack(self, model_pth, sample_idx, metric='L2', targeted=False,
-                    shuffle_mode='elm', shuffle_tag=0):
+                    overshoot=0.01, shuffle_mode='elm', shuffle_tag=0):
         batch_idx = sample_idx//AttackJob.BATCH_SIZE
         sample_idx = sample_idx%AttackJob.BATCH_SIZE
         cond = {
@@ -273,6 +295,7 @@ class AttackJob(BaseJob):
             'metric': metric,
             'targeted': targeted,
             'eps_level': None,
+            'overshoot': overshoot,
             'batch_idx': batch_idx,
             }
         if targeted:
@@ -280,17 +303,19 @@ class AttackJob(BaseJob):
                 'shuffle_mode': shuffle_mode,
                 'shuffle_tag': shuffle_tag,
                 })
-        min_dist, best_adv = None, None
+        min_dist, best_key = None, None
         for key, config in self.conditioned(cond):
-            result = self.results[key]
-            _dists, _advs = result['dists'], result['advs']
+            preview = self.previews[key]
+            _dists = preview['dists']
             if min_dist is None or min_dist>_dists[sample_idx]:
                 min_dist = _dists[sample_idx]
-                best_adv = _advs[sample_idx].copy()
+                best_key = key
+        result = self.results[best_key]
+        best_adv = result['advs'][sample_idx].copy()
         return min_dist, best_adv
 
-    def pool_results(self, model_pth, metric='L2', targeted=False, eps=None, *,
-                     max_batch_num=None, preview_only=False):
+    def pool_results(self, model_pth, metric='L2', targeted=False, eps=None,
+                     overshoot=0.01, *, max_batch_num=None, preview_only=False):
         r"""Pools the results for one model.
 
         Args
@@ -303,6 +328,8 @@ class AttackJob(BaseJob):
             Whether the attack is targeted.
         eps: float
             The attack size.
+        overshoot: float
+            The overshoot parameter.
         max_batch_num: int
             The maximum number of batches to gather. Gather all available
             results when `max_batch_num` is ``None``.
@@ -330,7 +357,8 @@ class AttackJob(BaseJob):
             'model_pth': model_pth,
             'metric': metric,
             'targeted': targeted,
-            'eps_level': eps_level
+            'eps_level': eps_level,
+            'overshoot': overshoot,
             }
 
         successes, dists = {}, {}
@@ -349,7 +377,7 @@ class AttackJob(BaseJob):
                 if eps is None:
                     idxs, = np.nonzero(_dists<dists[batch_idx])
                 else:
-                    idxs, = np.nonzero(_successes.astype(np.float)>successes[batch_idx].astype(np.float))
+                    idxs, = np.nonzero(_successes.astype(float)>successes[batch_idx].astype(float))
                 successes[batch_idx][idxs] = _successes[idxs]
                 dists[batch_idx][idxs] = _dists[idxs]
                 if not preview_only:
@@ -378,7 +406,43 @@ class AttackJob(BaseJob):
         else:
             raise RuntimeError(f"no results found for {model_pth}")
 
-    def summarize(self, model_pths, metric='L2', targeted=False, eps=None, max_batch_num=None):
+    def shared_idxs(self, model_pths, margin=0.1, **kwargs):
+        s_idxs = None
+        for model_pth in model_pths:
+            _s_idxs, _, _dists, _ = self.pool_results(model_pth, preview_only=True, **kwargs)
+            _s_idxs = set(np.array(_s_idxs)[(_dists>np.quantile(_dists, margin))&(_dists<np.quantile(_dists, 1-margin))])
+            if s_idxs is None:
+                s_idxs = _s_idxs
+            else:
+                s_idxs = s_idxs&_s_idxs
+        s_idxs = list(s_idxs)
+        return s_idxs
+
+    def gather_images(self, dataset, model_pths, s_idxs, **kwargs):
+        images, labels = [], []
+        for s_idx in s_idxs:
+            image, label = dataset[s_idx]
+            images.append(image.numpy())
+            labels.append(label)
+        images, labels = np.stack(images), np.stack(labels)
+
+        advs, predicts = [], []
+        for model_pth in model_pths:
+            _advs = np.stack([self.best_attack(model_pth, s_idx, **kwargs)[1] for s_idx in s_idxs])
+            advs.append(_advs)
+
+            model = torch.load(model_pth)['model']
+            model.eval().to(self.device)
+            with torch.no_grad():
+                logits = model(torch.tensor(_advs, dtype=torch.float, device=self.device)).cpu()
+                _, _predicts = logits.max(dim=1)
+            predicts.append(_predicts.numpy())
+        advs, predicts = np.stack(advs), np.stack(predicts)
+
+        diffs = advs-images
+        return images, labels, advs, predicts, diffs
+
+    def summarize(self, model_pths, metric='L2', targeted=False, eps=None, overshoot=0.01, max_batch_num=None):
         r"""Summarizes a list of models.
 
         Args
@@ -391,6 +455,8 @@ class AttackJob(BaseJob):
             Whether the attack is targeted.
         eps: float
             The attack size.
+        overshoot: float
+            The overshoot parameter.
         max_batch_num: int
             The maximum number of batches to gather. Gather all available
             results when `max_batch_num` is ``None``.
@@ -415,7 +481,7 @@ class AttackJob(BaseJob):
         for model_pth in model_pths:
             try:
                 _, successes, dists, _ = self.pool_results(
-                    model_pth, metric, targeted, eps,
+                    model_pth, metric, targeted, eps, overshoot,
                     max_batch_num=max_batch_num, preview_only=True,
                     )
             except:
@@ -425,6 +491,20 @@ class AttackJob(BaseJob):
         success_rates = np.array(success_rates)
         dist_percentiles = np.array(dist_percentiles).reshape(-1, 101) # reshape for empty array
         return success_rates, dist_percentiles
+
+    def plot_perturbation_distribution(self, ax, groups, **kwargs):
+        dists = {}
+        for tag, model_pths, _ in groups:
+            dists[tag] = []
+            for model_pth in model_pths:
+                _, _, _dists, _ = self.pool_results(model_pth, preview_only=True, **kwargs)
+                dists[tag].append(_dists)
+            dists[tag] = np.concatenate(dists[tag])
+        tags = [tag for tag, *_ in groups]
+        ax.boxplot([dists[tag] for tag in tags], vert=False, sym='', labels=tags)
+        ax.set_ylim(ax.get_ylim()[::-1])
+        ax.set_xlabel('minimum perturbation')
+
 
     def plot_comparison(self, ax, groups, dist_percentiles):
         r"""Plots comparison of groups.
@@ -446,11 +526,11 @@ class AttackJob(BaseJob):
         for i, (tag, _, color) in enumerate(groups):
             d_mean = np.mean(dist_percentiles[i], axis=0)
             d_std = np.std(dist_percentiles[i], axis=0)
-            idxs = d_mean>0
+            idxs = (d_mean>0)&(p_ticks<=98)
             h, = ax.plot(d_mean[idxs], p_ticks[idxs], color=color)
             ax.fill_betweenx(
                 p_ticks[idxs], d_mean[idxs]-d_std[idxs], d_mean[idxs]+d_std[idxs],
-                color=color, alpha=0.2
+                color=color, alpha=0.2,
                 )
             lines.append(h)
             legends.append(tag)
