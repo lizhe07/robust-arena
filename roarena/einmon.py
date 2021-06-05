@@ -15,7 +15,7 @@ from jarvis.utils import get_seed, set_seed, job_parser
 
 from . import DEVICE, BATCH_SIZE, WORKER_NUM
 
-ALPHAS = [0, 2, 3, 4, 6, 7, 8, 9, 11, 13, 16, 21, 28]
+ALPHAS = [0, 3, 4, 5, 6, 8, 9, 11, 13, 15, 17, 19, 22, 27, 33, 42, 57, 100]
 
 
 class EinMonDataset(torch.utils.data.Dataset):
