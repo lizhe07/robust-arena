@@ -311,7 +311,7 @@ class AttackJob(BaseJob):
                 min_dist = _dists[sample_idx]
                 best_key = key
         result = self.results[best_key]
-        best_adv = result['advs'][sample_idx].copy()
+        best_adv = result['advs'][sample_idx]
         return min_dist, best_adv
 
     def pool_results(self, model_pth, metric='L2', targeted=False, eps=None,
@@ -541,10 +541,10 @@ class AttackJob(BaseJob):
 if __name__=='__main__':
     parser = job_parser()
     parser.add_argument('--store_dir', default='store')
-    parser.add_argument('--datasets_dir', default='vision_datasets')
+    parser.add_argument('--datasets_dir', default='datasets')
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
-    parser.add_argument('--max_seed', default=4, type=int)
+    parser.add_argument('--max_seed', default=100, type=int)
     parser.add_argument('--batch_num', default=50, type=int)
     args = parser.parse_args()
 
@@ -556,7 +556,7 @@ if __name__=='__main__':
             'seed': list(range(args.max_seed)),
             'metric': METRICS,
             'name': ['BB'],
-            'targeted': [False],
+            'targeted': [False, True],
             'eps': [None],
             'batch_idx': list(range(args.batch_num)),
             }
