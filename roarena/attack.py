@@ -52,11 +52,11 @@ class AttackJob(BaseJob):
     """
     BATCH_SIZE = 20
 
-    def __init__(self, store_dir, datasets_dir, device=DEVICE, worker_num=WORKER_NUM):
+    def __init__(self, store_dir, datasets_dir, device=DEVICE, worker_num=WORKER_NUM, **kwargs):
         if store_dir is None:
-            super(AttackJob, self).__init__()
+            super(AttackJob, self).__init__(**kwargs)
         else:
-            super(AttackJob, self).__init__(os.path.join(store_dir, 'attacks'))
+            super(AttackJob, self).__init__(os.path.join(store_dir, 'attacks'), **kwargs)
         self.datasets_dir = datasets_dir
         self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
         self.worker_num = worker_num
