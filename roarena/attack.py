@@ -361,18 +361,13 @@ class AttackJob(BaseJob):
             'overshoot': overshoot,
             }
 
-        successes, dists = {}, {}
-        if not preview_only:
-            advs = {}
+        successes, dists, keys = {}, {}, {}
         batch_idxs = []
         for key, config in self.conditioned(cond):
             batch_idx = config['batch_idx']
-            if preview_only:
-                preview = self.previews[key]
-                _successes, _dists = preview['successes'], preview['dists']
-            else:
-                result = self.results[key]
-                _successes, _dists, _advs = result['successes'], result['dists'], result['advs']
+            preview = self.previews[key]
+            _successes, _dists = preview['successes'], preview['dists']
+            _keys = np.array([key]*len(_successes), dtype=object)
             if batch_idx in batch_idxs:
                 if eps is None:
                     idxs, = np.nonzero(_dists<dists[batch_idx])
@@ -380,16 +375,26 @@ class AttackJob(BaseJob):
                     idxs, = np.nonzero(_successes.astype(float)>successes[batch_idx].astype(float))
                 successes[batch_idx][idxs] = _successes[idxs]
                 dists[batch_idx][idxs] = _dists[idxs]
-                if not preview_only:
-                    advs[batch_idx][idxs] = _advs[idxs]
+                keys[batch_idx][idxs] = _keys[idxs]
             else:
                 successes[batch_idx] = _successes
                 dists[batch_idx] = _dists
-                if not preview_only:
-                    advs[batch_idx] = _advs
+                keys[batch_idx] = _keys
                 batch_idxs.append(batch_idx)
             if max_batch_num is not None and len(batch_idxs)==max_batch_num:
                 break
+
+        if not preview_only:
+            advs = {}
+            for batch_idx in batch_idxs:
+                for key in np.unique(keys[batch_idx]):
+                    result = self.results[key]
+                    _advs = result['advs']
+                    if batch_idx not in advs:
+                        advs[batch_idx] = np.empty(_advs.shape)
+                    idxs, = np.nonzero(keys[batch_idx]==key)
+                    advs[batch_idx][idxs] = _advs[idxs]
+
         if batch_idxs:
             sample_idxs = []
             for batch_idx in batch_idxs:
@@ -404,7 +409,7 @@ class AttackJob(BaseJob):
                 advs = np.concatenate([advs[batch_idx] for batch_idx in batch_idxs])
             return sample_idxs, successes, dists, advs
         else:
-            raise RuntimeError(f"no results found for {model_pth}")
+            return [], np.empty((0,), bool), np.empty((0,), float), None
 
     def shared_idxs(self, model_pths, margin=0.1, **kwargs):
         s_idxs = None
@@ -441,6 +446,48 @@ class AttackJob(BaseJob):
 
         diffs = advs-images
         return images, labels, advs, predicts, diffs
+
+    def plot_examples(self, axes, model_pths, sample_num, shared_cmap=True, margin=0.2, **kwargs):
+        assert axes.shape==(1+2*len(model_pths), sample_num)
+
+        task = None
+        for model_pth in model_pths:
+            if task is None:
+                task = torch.load(model_pth)['task']
+            else:
+                assert task==torch.load(model_pth)['task']
+        dataset = prepare_datasets(task, self.datasets_dir)
+
+        s_idxs = self.shared_idxs(model_pths, margin=margin, **kwargs)
+        s_idxs = random.sample(s_idxs, sample_num)
+        images, labels, advs, predicts, diffs = self.gather_images(
+            dataset, model_pths, s_idxs, **kwargs
+            )
+
+        is_rgb = images.shape[1]==3
+        for i in range(sample_num):
+            if is_rgb:
+                axes[0, i].imshow(images[i].transpose(1, 2, 0))
+            else:
+                axes[0, i].imshow(images[i, 0], cmap='gray')
+            axes[0, i].set_title(dataset.class_names[labels[i]])
+        vmax = np.abs(diffs).max()
+        for j in range(len(model_pths)):
+            if not shared_cmap:
+                vmax = np.abs(diffs[j]).max()
+            for i in range(sample_num):
+                if is_rgb:
+                    axes[2*j+1, i].imshow(advs[j, i].transpose(1, 2, 0))
+                else:
+                    axes[2*j+1, i].imshow(advs[j, i, 0], cmap='gray')
+                axes[2*j+1, i].set_title(dataset.class_names[predicts[j, i]])
+                if is_rgb:
+                    axes[2*j+2, i].imshow((diffs[j, i].transpose(1, 2, 0)+vmax)/(2*vmax))
+                else:
+                    axes[2*j+2, i].imshow(diffs[j, i, 0], vmin=-vmax, vmax=vmax, cmap='bwr')
+        for ax in axes.ravel():
+            ax.set_xticks([])
+            ax.set_yticks([])
 
     def summarize(self, model_pths, metric='L2', targeted=False, eps=None, overshoot=0.01, max_batch_num=None):
         r"""Summarizes a list of models.
