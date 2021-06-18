@@ -83,7 +83,7 @@ class EinMonJob(BaseJob):
         self.batch_size = batch_size
         self.worker_num = worker_num
 
-    def prepare_dataset(self, task, alpha, seed, grayscale=False):
+    def prepare_dataset(self, task, alpha, seed):
         r"""Prepares the Einstein-Monroe dataset.
 
         Existing datasets that mix CIFAR images with different mixing
@@ -108,7 +108,7 @@ class EinMonJob(BaseJob):
 
         """
         dataset = EinMonDataset(
-            prepare_datasets(task, self.datasets_dir, grayscale=grayscale),
+            prepare_datasets(task, self.datasets_dir),
             alpha=alpha, seed=seed,
             )
         return dataset
@@ -182,7 +182,6 @@ class EinMonJob(BaseJob):
         # prepare Einstein-Monroe dataset
         dataset = self.prepare_dataset(
             saved['task'], config['alpha'], config['seed'],
-            grayscale=saved['grayscale'] if 'grayscale' in saved else False,
             )
 
         # evaluate model
