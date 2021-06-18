@@ -73,11 +73,11 @@ class EinMonDataset(torch.utils.data.Dataset):
 class EinMonJob(BaseJob):
 
     def __init__(self, store_dir, datasets_dir, device=DEVICE,
-                 batch_size=BATCH_SIZE, worker_num=WORKER_NUM):
+                 batch_size=BATCH_SIZE, worker_num=WORKER_NUM, **kwargs):
         if store_dir is None:
-            super(EinMonJob, self).__init__()
+            super(EinMonJob, self).__init__(**kwargs)
         else:
-            super(EinMonJob, self).__init__(os.path.join(store_dir, 'em-results'))
+            super(EinMonJob, self).__init__(os.path.join(store_dir, 'em-results'), **kwargs)
         self.datasets_dir = datasets_dir
         self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
         self.batch_size = batch_size
