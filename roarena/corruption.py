@@ -7,10 +7,10 @@ Created on Thu Sep 10 16:39:55 2020
 
 import os, argparse, pickle, torch
 import numpy as np
-from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torchvision.transforms.functional import rgb_to_grayscale
 
+import jarvis
 from jarvis import BaseJob
 from jarvis.vision import evaluate, IMAGENET_TEST
 from jarvis.utils import job_parser
@@ -49,11 +49,11 @@ class CorruptionJob(BaseJob):
     """
 
     def __init__(self, store_dir, datasets_dir, device=DEVICE,
-                 batch_size=BATCH_SIZE, worker_num=WORKER_NUM):
+                 batch_size=BATCH_SIZE, worker_num=WORKER_NUM, **kwargs):
         if store_dir is None:
-            super(CorruptionJob, self).__init__()
+            super(CorruptionJob, self).__init__(**kwargs)
         else:
-            super(CorruptionJob, self).__init__(os.path.join(store_dir, 'c-tests'))
+            super(CorruptionJob, self).__init__(os.path.join(store_dir, 'c-tests'), **kwargs)
         self.datasets_dir = datasets_dir
         self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
         self.batch_size = batch_size
@@ -96,6 +96,11 @@ class CorruptionJob(BaseJob):
             The dataset containing corrupted images and class labels.
 
         """
+        if severity==0:
+            dataset = jarvis.vision.prepare_datasets(
+                task, self.datasets_dir, grayscale=grayscale,
+                )
+            return dataset
         if task in ['CIFAR10', 'CIFAR100']:
             if task=='CIFAR10':
                 npy_dir = os.path.join(self.datasets_dir, 'CIFAR-10-C')
@@ -113,13 +118,9 @@ class CorruptionJob(BaseJob):
                 )
             dataset = torch.utils.data.TensorDataset(images, labels)
         if task=='ImageNet':
-            if grayscale:
-                t_test = [transforms.Grayscale(), transforms.ToTensor()]
-            else:
-                t_test = [transforms.ToTensor()]
             dataset = ImageFolder(
                 os.path.join(self.datasets_dir, 'ImageNet-C', corruption, str(severity)),
-                transform = transforms.Compose(IMAGENET_TEST+t_test)
+                transform=IMAGENET_TEST,
                 )
         return dataset
 
@@ -176,6 +177,16 @@ class CorruptionJob(BaseJob):
                 if key is not None and self.is_completed(key):
                     accs[corruption].append(self.results[key]['acc'])
             accs[corruption] = np.array(accs[corruption])
+        accs['clean'] = []
+        for model_pth in model_pths:
+            config = {
+                'model_pth': model_pth,
+                'corruption': None,
+                'severity': 0,
+                }
+            result, _ = self.process(config, verbose=False)
+            accs['clean'].append(result['acc'])
+        accs['clean'] = np.array(accs['clean'])
         return accs
 
     def plot_comparison(self, ax, groups, accs):
@@ -195,19 +206,21 @@ class CorruptionJob(BaseJob):
         """
         bin_width = 0.8/len(groups)
         bars, legends = [], []
+        _CORRUPTIONS = CORRUPTIONS+['clean']
+        xticks = np.array(list(range(len(CORRUPTIONS)))+[len(CORRUPTIONS)+1])
         for i, (tag, _, color) in enumerate(groups):
-            acc_mean = np.array([np.mean(accs[i][c]) for c in CORRUPTIONS])*100
-            acc_std = np.array([np.std(accs[i][c]) for c in CORRUPTIONS])*100
+            acc_mean = np.array([np.mean(accs[i][c]) for c in _CORRUPTIONS])*100
+            acc_std = np.array([np.std(accs[i][c]) for c in _CORRUPTIONS])*100
             h = ax.bar(
-                np.arange(len(CORRUPTIONS))+(i-0.5*(len(groups)-1))*bin_width,
+                xticks+(i-0.5*(len(groups)-1))*bin_width,
                 acc_mean, width=bin_width, yerr=acc_std, zorder=2, facecolor=color,
                 )
             h.errorbar.get_children()[0].set_edgecolor(np.array(color)*0.6)
             bars.append(h)
             legends.append(tag)
         ax.legend(bars, legends)
-        ax.set_xticks(np.arange(len(CORRUPTIONS)))
-        ax.set_xticklabels(CORRUPTIONS, rotation=90)
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(_CORRUPTIONS, rotation=90)
         ax.set_ylabel('accuracy (%)')
         ax.set_ylim([0, 100])
         ax.grid(axis='y')
