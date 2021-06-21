@@ -8,6 +8,7 @@ Created on Thu Sep 10 16:39:55 2020
 import os, argparse, pickle, torch
 import numpy as np
 from torchvision.datasets import ImageFolder
+from torchvision import transforms
 from torchvision.transforms.functional import rgb_to_grayscale
 
 import jarvis
@@ -76,7 +77,7 @@ class CorruptionJob(BaseJob):
             'severity': args.severity,
             }
 
-    def prepare_dataset(self, task, grayscale, corruption, severity):
+    def prepare_dataset(self, task, corruption, severity):
         r"""Returns common corruption testing set.
 
         Args
@@ -97,10 +98,14 @@ class CorruptionJob(BaseJob):
 
         """
         if severity==0:
-            dataset = jarvis.vision.prepare_datasets(
-                task, self.datasets_dir, grayscale=grayscale,
-                )
+            dataset = jarvis.vision.prepare_datasets(task, self.datasets_dir)
             return dataset
+
+        if task.endswith('-Gray'):
+            task = task[:-5]
+            to_grayscale = True
+        else:
+            to_grayscale = False
         if task in ['CIFAR10', 'CIFAR100']:
             if task=='CIFAR10':
                 npy_dir = os.path.join(self.datasets_dir, 'CIFAR-10-C')
@@ -111,13 +116,16 @@ class CorruptionJob(BaseJob):
             images = torch.tensor(
                 images[(severity-1)*10000:severity*10000], dtype=torch.float
                 ).permute(0, 3, 1, 2)
-            if grayscale:
+            if to_grayscale:
                 images = rgb_to_grayscale(images)
             labels = torch.tensor(
                 np.load(os.path.join(npy_dir, 'labels.npy'))[:10000], dtype=torch.long
                 )
             dataset = torch.utils.data.TensorDataset(images, labels)
         if task=='ImageNet':
+            t_test = IMAGENET_TEST
+            if to_grayscale:
+                t_test = transforms.Compose([t_test, transforms.Grayscale()])
             dataset = ImageFolder(
                 os.path.join(self.datasets_dir, 'ImageNet-C', corruption, str(severity)),
                 transform=IMAGENET_TEST,
@@ -134,17 +142,14 @@ class CorruptionJob(BaseJob):
 
         # evaluate on common corruption dataset
         dataset = self.prepare_dataset(
-            saved['task'], saved['grayscale'] if 'grayscale' in saved else False,
-            config['corruption'], config['severity'],
+            saved['task'], config['corruption'], config['severity'],
             )
         loss, acc = evaluate(
-            model, dataset, self.batch_size, self.device, self.worker_num,
+            model, dataset, self.batch_size, self.device, self.worker_num, verbose,
             )
-        if verbose:
-            print('accuracy: {:.2%}'.format(acc))
 
         result = {'loss': loss, 'acc': acc}
-        preview = {}
+        preview = {'loss': loss, 'acc': acc}
         return result, preview
 
     def summarize(self, model_pths, severity=5):
