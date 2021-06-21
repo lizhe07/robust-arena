@@ -234,7 +234,7 @@ class CorruptionJob(BaseJob):
 if __name__=='__main__':
     parser = job_parser()
     parser.add_argument('--store_dir', default='store')
-    parser.add_argument('--datasets_dir', default='vision_datasets')
+    parser.add_argument('--datasets_dir', default='datasets')
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
