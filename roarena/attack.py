@@ -366,7 +366,7 @@ class AttackJob(BaseJob):
         for key, config in self.conditioned(cond):
             batch_idx = config['batch_idx']
             preview = self.previews[key]
-            _successes, _dists = preview['successes'], preview['dists']
+            _successes, _dists = preview['successes'].copy(), preview['dists'].copy()
             _keys = np.array([key]*len(_successes), dtype=object)
             if batch_idx in batch_idxs:
                 if eps is None:
