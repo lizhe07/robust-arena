@@ -101,6 +101,81 @@ class AttackJob(BaseJob):
                 })
         return config
 
+    def minimum_attack(self, model_pth, s_idx, overshoot=0.01,
+                       metric='L2', targeted=False,
+                       shuffle_mode='elm', shuffle_tag=0, fetch_adv=False):
+        b_idx = s_idx//AttackJob.BATCH_SIZE
+        s_idx = s_idx%AttackJob.BATCH_SIZE
+        cond = {
+            'model_pth': model_pth,
+            'metric': metric,
+            'targeted': targeted,
+            'overshoot': overshoot,
+            'batch_idx': b_idx,
+        }
+        if targeted:
+            cond.update({
+                'shuffle_mode': shuffle_mode,
+                'shuffle_tag': shuffle_tag,
+                })
+        min_dist, best_key, count = None, None, 0
+        for key, _ in self.conditioned(cond):
+            try:
+                preview = self.previews[key]
+            except:
+                continue
+            count += 1
+            if preview['successes'][s_idx]:
+                if (min_dist is None) or min_dist>preview['dists'][s_idx]:
+                    min_dist = preview['dists'][s_idx]
+                    best_key = key
+        if fetch_adv:
+            result = self.results[best_key]
+            adv = result['advs'][s_idx]
+            return min_dist, count, adv
+        else:
+            return min_dist, count
+
+    def strongest_attack(self, model_pth, s_idx, eps=None,
+                         metric='L2', targeted=False,
+                         shuffle_mode='elm', shuffle_tag=0, fetch_adv=False):
+        if eps is None:
+            if metric=='LI':
+                eps = 8/255
+            if metric=='L2':
+                eps = 0.5
+
+        b_idx = s_idx//AttackJob.BATCH_SIZE
+        s_idx = s_idx%AttackJob.BATCH_SIZE
+        cond = {
+            'model_pth': model_pth,
+            'metric': metric,
+            'targeted': targeted,
+            'batch_idx': b_idx,
+        }
+        if targeted:
+            cond.update({
+                'shuffle_mode': shuffle_mode,
+                'shuffle_tag': shuffle_tag,
+                })
+        max_overshoot, best_key = None, None
+        for key, config in self.conditioned(cond):
+            try:
+                preview = self.previews[key]
+            except:
+                continue
+            if preview['successes'][s_idx] and preview['dists'][s_idx]<=eps:
+                if (max_overshoot is None) or max_overshoot<config['overshoot']:
+                    max_overshoot = config['overshoot']
+                    best_key = key
+        if fetch_adv:
+            result = self.results[best_key]
+            adv = result['advs'][s_idx]
+            return max_overshoot, adv
+        else:
+            return max_overshoot
+
+
     def prepare_batch(self, dataset, batch_idx, targeted, overshoot,
                       shuffle_mode='elm', shuffle_tag=0, **kwargs):
         r"""Prepares an image batch and the attack criterion.
