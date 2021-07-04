@@ -81,7 +81,7 @@ class AttackJob(BaseJob):
                             help="shuffle mode of targeted attack labels")
         parser.add_argument('--shuffle_tag', default=0, type=int,
                             help="shuffule tag of targeted attack labels")
-        parser.add_argument('--overshoot', default=0.01, type=float,
+        parser.add_argument('--overshoot', default=0., type=float,
                             help="overshoot parameter for logits")
         parser.add_argument('--name', default='BB', choices=NAMES,
                             help="name of attack method")
@@ -409,6 +409,8 @@ if __name__=='__main__':
         search_spec['eps_level'] = [None]+EPS_LEVELS
     if 'targeted' not in search_spec:
         search_spec['targeted'] = [False, True]
+    if 'overshoot' not in search_spec:
+        search_spec['overshoot'] = [0, 0.5, 1, 1.5, 2, 3, 4, 5]
     if 'name' not in search_spec:
         search_spec['name'] = NAMES
     if 'sample_idx' not in search_spec:
