@@ -261,7 +261,7 @@ if __name__=='__main__':
         export_dir = '/'.join([args.store_dir, 'models'])
         assert os.path.exists(export_dir), "directory of models not found"
         search_spec['model_pth'] = [
-            '/'.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')
+            '/'.join([export_dir, f]) for f in os.listdir(export_dir) if f.endswith('.pt')
             ]
     if 'metric' not in search_spec:
         search_spec['metric'] = METRICS
