@@ -114,6 +114,28 @@ class AttackJob(BaseJob):
         return config
 
     def shuffled_targets(self, targets, shuffle_mode, shuffle_tag):
+        r"""Returns shuffled targets for attack.
+
+        Original image labels are shuffled so that wrong labels are assigned as
+        attack targets.
+
+        Args
+        ----
+        targets: list of int
+            The original labels of dataset, obtained by `targets = dataset.targets`.
+        shuffle_mode: str
+            The shuffle mode of targeted attack labels. ``'elm'`` means
+            element-wise shuffling, and ``'cls'`` means class-wise shuffling.
+        shuffle_tag: int
+            The shuffle tag of targeted attack labels, will be used as a random
+            seed.
+
+        Returns
+        -------
+        targets: ndarray
+            The target class label for all images in the dataset.
+
+        """
         set_seed(shuffle_tag)
         labels_all = np.array(targets)
         if shuffle_mode=='elm':
@@ -143,6 +165,25 @@ class AttackJob(BaseJob):
         return targets
 
     def dataset_attack(self, model, dataset, criterion):
+        r"""Dataset attack for single image.
+
+        Args
+        ----
+        model: PyTorch model
+            The model to be attacked.
+        dataset: Dataset
+            The dataset used for attack, only the images will be used. Usually
+            it is the testing set as it is available to the attacker.
+        criterion: Foolbox criterion
+            A criterion containing only one label, e.g. `criterion.labels` or
+            `criterion.target_classes` is of length one.
+
+        Returns
+        -------
+        images: tensor, (1, C, H, W)
+            A single-image batch as the 'adversarial' example.
+
+        """
         success = False
         for s_idx in random.sample(range(len(dataset)), len(dataset)):
             image, _ = dataset[s_idx]
@@ -241,7 +282,62 @@ class AttackJob(BaseJob):
         return result, preview
 
     def best_attack(self, model_pth, sample_idx, metric, targeted, *,
-                    min_prob=None, max_dist=None, shuffle_mode='elm', shuffle_tag=0):
+                    min_prob=None, max_dist=None,
+                    shuffle_mode='elm', shuffle_tag=0, preview_only=True):
+        r"""Returns the best attack found so far.
+
+        Depending on which of `min_prob` and `max_dist` are provided, the best
+        attack can either be the minimum perturbed example given a minimum
+        probability requirement, or the most confident example given a maximum
+        perturbation budget.
+
+        Args
+        ----
+        model_pth: str
+            The path to saved model.
+        sample_idx: int
+            The index of sample to be attacked.
+        metric: str
+            Perturbation metric, can be ``'LI'`` or ``'L2'``.
+        targeted: bool
+            Whether the attack is targeted or not.
+        min_prob: float
+            The minimum probability requirement of an adversarial example.
+        max_dist: float
+            The maximum perturbation budget of an adversarial example.
+        shuffle_mode: str
+            The shuffle mode of targeted attack labels.
+        shuffle_tag: int
+            The shuffle tag of targeted attack labels.
+        preview_only: bool
+            Whether to return adversarial example.
+
+        Returns
+        -------
+        counts: dict
+            The count of different types of attack tried.
+        best_key: str
+            The key of best attack found.
+        adv: ndarray, (C, H, W)
+            The best adversarial example. ``None`` is returned if `preview_only`
+            is ``True``.
+        dist: float
+            The perturbation size.
+        prob: float
+            The probability of the model reporting about the best attack.
+
+        Example
+        -------
+        >>> counts, best_key, adv, dist, prob = job.best_attack(
+                model_pth, sample_idx, metric, targeted, min_prob=0.5
+                )
+        >>> counts, best_key, adv, dist, prob = job.best_attack(
+                model_pth, sample_idx, metric, targeted, max_dist=0.03
+                )
+
+
+        """
+        assert self.readonly, "the job needs to be read-only"
         if min_prob is not None:
             assert max_dist is None
             min_dist = None
@@ -259,7 +355,7 @@ class AttackJob(BaseJob):
                 'shuffle_mode': shuffle_mode,
                 'shuffle_tag': shuffle_tag,
                 })
-        best_key, counts = None, {}
+        counts, best_key = {}, None
         for key, config in self.conditioned(cond):
             name = config['name']
             if name in counts:
@@ -274,12 +370,16 @@ class AttackJob(BaseJob):
                 if max_dist is not None and preview['dist']<=max_dist and (max_prob is None or max_prob<preview['prob_adv']):
                     max_prob = preview['prob_adv']
                     best_key = key
-        adv = self.results[best_key]['adv']
-        if min_prob is not None:
-            return adv, min_dist, best_key, counts
-        if max_dist is not None:
-            return adv, max_prob, best_key, counts
-
+        if best_key is None:
+            return counts, best_key, None, np.nan, np.nan
+        preview = self.previews[best_key]
+        dist, prob = preview['dist'], preview['prob_adv']
+        if preview_only:
+            adv = None
+        else:
+            result = self.results[best_key]
+            adv = result['adv']
+        return counts, best_key, adv, dist, prob
 
 if __name__=='__main__':
     parser = job_parser()
