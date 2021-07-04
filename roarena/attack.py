@@ -15,6 +15,7 @@ from jarvis.utils import job_parser, get_seed, set_seed, time_str
 
 from . import DEVICE, WORKER_NUM
 
+EPS_LEVELS = list(range(1, 101))
 METRICS = ['L2', 'LI']
 NAMES = ['PGD', 'BI', 'DF', 'BB']
 ATTACKS = {
@@ -37,7 +38,6 @@ IMG_SIZES = {
     'CIFAR100': 3*32*32,
     'ImageNet': 3*224*224,
     }
-EPS_RESOL = {'L2': 0.01, 'LI': 1/255}
 
 
 class AttackJob(BaseJob):
@@ -73,7 +73,7 @@ class AttackJob(BaseJob):
         parser.add_argument('--model_pth', help="path to the model")
         parser.add_argument('--metric', default='LI', choices=METRICS,
                             help="perturbation metric")
-        parser.add_argument('--eps_level', type=int, choices=list(range(100)),
+        parser.add_argument('--eps_level', type=int, choices=EPS_LEVELS),
                             help="integer for epsilon [0, 100)")
         parser.add_argument('--targeted', action='store_true',
                             help="whether the attack is targeted")
@@ -95,6 +95,8 @@ class AttackJob(BaseJob):
         assert args.model_pth is not None
         if args.name in ['BI', 'DF']:
             args.seed = 0
+        if args.name in ['PGD', 'BI'] and args.eps_level is None:
+            args.eps_level = 1
         if args.name in ['DF', 'BB']:
             args.eps_level = None
         config = {
@@ -238,6 +240,46 @@ class AttackJob(BaseJob):
             }
         return result, preview
 
+    def best_attack(self, model_pth, sample_idx, metric, targeted, *,
+                    min_prob=None, max_dist=None, shuffle_mode='elm', shuffle_tag=0):
+        if min_prob is not None:
+            assert max_dist is None
+            min_dist = None
+        if max_dist is not None:
+            assert min_prob is None
+            max_prob = None
+        cond = {
+            'model_pth': model_pth,
+            'sample_idx': sample_idx,
+            'metric': metric,
+            'targeted': targeted,
+            }
+        if targeted:
+            cond.update({
+                'shuffle_mode': shuffle_mode,
+                'shuffle_tag': shuffle_tag,
+                })
+        best_key, counts = None, {}
+        for key, config in self.conditioned(cond):
+            name = config['name']
+            if name in counts:
+                counts[name] += 1
+            else:
+                counts[name] = 1
+            preview = self.previews[key]
+            if preview['success']:
+                if min_prob is not None and preview['prob_adv']>=min_prob and (min_dist is None or min_dist>preview['dist']):
+                    min_dist = preview['dist']
+                    best_key = key
+                if max_dist is not None and preview['dist']<=max_dist and (max_prob is None or max_prob<preview['prob_adv']):
+                    max_prob = preview['prob_adv']
+                    best_key = key
+        adv = self.results[best_key]['adv']
+        if min_prob is not None:
+            return adv, min_dist, best_key, counts
+        if max_dist is not None:
+            return adv, max_prob, best_key, counts
+
 
 if __name__=='__main__':
     parser = job_parser()
@@ -264,7 +306,7 @@ if __name__=='__main__':
     if 'metric' not in search_spec:
         search_spec['metric'] = METRICS
     if 'eps_level' not in search_spec:
-        search_spec['eps_level'] = [None]+list(range(100))
+        search_spec['eps_level'] = [None]+EPS_LEVELS
     if 'targeted' not in search_spec:
         search_spec['targeted'] = [False, True]
     if 'name' not in search_spec:
