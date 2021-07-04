@@ -31,6 +31,12 @@ ATTACKS = {
         'BB': fb.attacks.LinfinityBrendelBethgeAttack(),
         },
     }
+IMG_SIZES = {
+    'MNIST': 1*28*28,
+    'CIFAR10': 3*32*32,
+    'CIFAR100': 3*32*32,
+    'ImageNet': 3*224*224,
+    }
 EPS_RESOL = {'L2': 0.01, 'LI': 1/255}
 
 
@@ -64,228 +70,87 @@ class AttackJob(BaseJob):
     def get_config(self, arg_strs):
         parser = argparse.ArgumentParser()
 
-        parser.add_argument('--model_pth')
-        parser.add_argument('--seed', default=0, type=int)
-        parser.add_argument('--metric', default='L2', choices=METRICS)
-        parser.add_argument('--name', default='BB', choices=NAMES)
-        parser.add_argument('--targeted', action='store_true')
-        parser.add_argument('--shuffle_mode', default='elm', choices=['elm', 'cls'])
-        parser.add_argument('--shuffle_tag', default=0, type=int)
-        parser.add_argument('--eps', type=float)
-        parser.add_argument('--overshoot', default=0.01, type=float)
-        parser.add_argument('--batch_idx', default=0, type=int)
+        parser.add_argument('--model_pth', help="path to the model")
+        parser.add_argument('--metric', default='LI', choices=METRICS,
+                            help="perturbation metric")
+        parser.add_argument('--eps_level', type=int, choices=list(range(100)),
+                            help="integer for epsilon [0, 100)")
+        parser.add_argument('--targeted', action='store_true',
+                            help="whether the attack is targeted")
+        parser.add_argument('--shuffle_mode', default='elm', choices=['elm', 'cls'],
+                            help="shuffle mode of targeted attack labels")
+        parser.add_argument('--shuffle_tag', default=0, type=int,
+                            help="shuffule tag of targeted attack labels")
+        parser.add_argument('--overshoot', default=0.01, type=float,
+                            help="overshoot parameter for logits")
+        parser.add_argument('--name', default='BB', choices=NAMES,
+                            help="name of attack method")
+        parser.add_argument('--sample_idx', default=0, type=int,
+                            help="index of sample to attack")
+        parser.add_argument('--seed', default=0, type=int,
+                            help="random seed")
 
         args, _ = parser.parse_known_args(arg_strs)
 
         assert args.model_pth is not None
-        if args.eps is None: # find minimum eps that gives successful attack
-            args.name = 'BB' # only use boundary attack
-            eps_level = None
-        else:
-            eps_level = int(args.eps/EPS_RESOL[args.metric])
-            assert eps_level>0
+        if args.name in ['BI', 'DF']:
+            args.seed = 0
+        if args.name in ['DF', 'BB']:
+            args.eps_level = None
         config = {
             'model_pth': args.model_pth,
-            'seed': get_seed(args.seed),
             'metric': args.metric,
-            'name': args.name,
+            'eps_level': args.eps_level,
             'targeted': args.targeted,
-            'eps_level': eps_level,
+            'shuffle_mode': args.shuffle_mode if args.targeted else None,
+            'shuffle_tag': args.shuffle_tag if args.targeted else None,
             'overshoot': args.overshoot,
-            'batch_idx': args.batch_idx,
+            'name': args.name,
+            'sample_idx': args.sample_idx,
+            'seed': get_seed(args.seed),
             }
-        if args.targeted:
-            config.update({
-                'shuffle_mode': args.shuffle_mode,
-                'shuffle_tag': args.shuffle_tag,
-                })
         return config
 
-    def minimum_attack(self, model_pth, s_idx, overshoot=0.01,
-                       metric='L2', targeted=False,
-                       shuffle_mode='elm', shuffle_tag=0, fetch_adv=False):
-        b_idx = s_idx//AttackJob.BATCH_SIZE
-        s_idx = s_idx%AttackJob.BATCH_SIZE
-        cond = {
-            'model_pth': model_pth,
-            'metric': metric,
-            'targeted': targeted,
-            'overshoot': overshoot,
-            'batch_idx': b_idx,
-        }
-        if targeted:
-            cond.update({
-                'shuffle_mode': shuffle_mode,
-                'shuffle_tag': shuffle_tag,
-                })
-        min_dist, best_key, count = None, None, 0
-        for key, _ in self.conditioned(cond):
-            try:
-                preview = self.previews[key]
-            except:
-                continue
-            count += 1
-            if preview['successes'][s_idx]:
-                if (min_dist is None) or min_dist>preview['dists'][s_idx]:
-                    min_dist = preview['dists'][s_idx]
-                    best_key = key
-        if fetch_adv:
-            result = self.results[best_key]
-            adv = result['advs'][s_idx]
-            return min_dist, count, adv
-        else:
-            return min_dist, count
-
-    def strongest_attack(self, model_pth, s_idx, eps=None,
-                         metric='L2', targeted=False,
-                         shuffle_mode='elm', shuffle_tag=0, fetch_adv=False):
-        if eps is None:
-            if metric=='LI':
-                eps = 8/255
-            if metric=='L2':
-                eps = 0.5
-
-        b_idx = s_idx//AttackJob.BATCH_SIZE
-        s_idx = s_idx%AttackJob.BATCH_SIZE
-        cond = {
-            'model_pth': model_pth,
-            'metric': metric,
-            'targeted': targeted,
-            'batch_idx': b_idx,
-        }
-        if targeted:
-            cond.update({
-                'shuffle_mode': shuffle_mode,
-                'shuffle_tag': shuffle_tag,
-                })
-        max_overshoot, best_key = None, None
-        for key, config in self.conditioned(cond):
-            try:
-                preview = self.previews[key]
-            except:
-                continue
-            if preview['successes'][s_idx] and preview['dists'][s_idx]<=eps:
-                if (max_overshoot is None) or max_overshoot<config['overshoot']:
-                    max_overshoot = config['overshoot']
-                    best_key = key
-        if fetch_adv:
-            result = self.results[best_key]
-            adv = result['advs'][s_idx]
-            return max_overshoot, adv
-        else:
-            return max_overshoot
-
-
-    def prepare_batch(self, dataset, batch_idx, targeted, overshoot,
-                      shuffle_mode='elm', shuffle_tag=0, **kwargs):
-        r"""Prepares an image batch and the attack criterion.
-
-        Args
-        ----
-        dataset: Dataset
-            The testing set.
-        batch_idx: int
-            The index of the batch to attack. Batch size is `BATCH_SIZE`.
-        targeted: bool
-            Whether the attack is targeted.
-        overshoot: float
-            The overshoot parameter.
-        shuffle_mode: str
-            The mode of shuffled targets for targeted attack.
-        shuffle_tag: int
-            The integer tag for shuffled targets.
-
-        Returns
-        -------
-        images: tensor
-            A batch of images.
-        criterion: fb criteria
-            The criterion used for foolbox attack.
-
-        """
-        images, labels = [], []
-        idx_min = AttackJob.BATCH_SIZE*batch_idx
-        idx_max = min(AttackJob.BATCH_SIZE*(batch_idx+1), len(dataset))
-        for idx in range(idx_min, idx_max):
-            image, label = dataset[idx]
-            images.append(image)
-            labels.append(torch.tensor(label, dtype=torch.long))
-        images = torch.stack(images).to(self.device)
-        labels = torch.stack(labels).to(self.device)
-        if targeted:
-            set_seed(shuffle_tag)
-            labels_all = np.array(dataset.targets)
-            if shuffle_mode=='elm':
-                last = labels_all.size
-                targets = np.random.permutation(labels_all)
-                while True:
-                    idxs, = np.nonzero(targets==labels_all)
-                    if idxs.size>0:
-                        if idxs.size<last:
-                            last = idxs.size
-                            targets[np.random.permutation(idxs)] = targets[idxs]
-                        else:
-                            last = labels_all.size
-                            targets = np.random.permutation(labels_all)
-                    else:
-                        break
-            if shuffle_mode=='cls':
-                _labels = np.unique(labels_all)
-                while True:
-                    _targets = np.random.permutation(_labels)
-                    if np.all(_targets!=_labels):
-                        break
-                targets = labels_all.copy()
-                for _t, _l in zip(_targets, _labels):
-                    targets[labels_all==_l] = _t
-            assert not np.any(targets==labels_all)
-            targets = torch.tensor(
-                targets[idx_min:idx_max], dtype=torch.long, device=self.device,
-                )
-            criterion = fb.criteria.TargetedMisclassification(targets, overshoot)
-        else:
-            criterion = fb.criteria.Misclassification(labels, overshoot)
-        return images, labels, criterion
-
-    def dataset_attack(self, model, dataset, labels, targeted, overshoot):
-        r"""Generates dataset attack.
-
-        Images are randomly selected from the whole dataset as attacks, which
-        serve as the initial point for boundary attack.
-
-        model: nn.Module
-            The model to attack.
-        dataset: Dataset
-            The full dataset.
-        labels: tensor
-            The batch of labels used for generating attacks. If the attack is
-            targeted, `labels` is the targeted labels. If the attack is
-            untargeted, `labels` is the true labels.
-        targeted: bool
-            Whether the attack is targeted.
-        overshoot: float
-            The overshoot parameter.
-
-        """
-        model.eval().to(self.device)
-
-        advs = []
-        for label in labels:
-            if targeted:
-                idxs, = np.nonzero(np.array(dataset.targets)==label.item())
-                criterion = fb.criteria.TargetedMisclassification(label[None], overshoot)
-            else:
-                idxs, = np.nonzero(np.array(dataset.targets)!=label.item())
-                criterion = fb.criteria.Misclassification(label[None], overshoot)
+    def shuffled_targets(self, targets, shuffle_mode, shuffle_tag):
+        set_seed(shuffle_tag)
+        labels_all = np.array(targets)
+        if shuffle_mode=='elm':
+            last = labels_all.size
+            targets = np.random.permutation(labels_all)
             while True:
-                image, _ = dataset[random.choice(idxs)]
-                with torch.no_grad():
-                    logit = model(image[None].to(self.device))[0]
-                is_adv = criterion(image[None], logit[None])[0]
-                if is_adv:
+                idxs, = np.nonzero(targets==labels_all)
+                if idxs.size>0:
+                    if idxs.size<last:
+                        last = idxs.size
+                        targets[np.random.permutation(idxs)] = targets[idxs]
+                    else:
+                        last = labels_all.size
+                        targets = np.random.permutation(labels_all)
+                else:
                     break
-            advs.append(image)
-        return torch.stack(advs)
+        if shuffle_mode=='cls':
+            _labels = np.unique(labels_all)
+            while True:
+                _targets = np.random.permutation(_labels)
+                if np.all(_targets!=_labels):
+                    break
+            targets = labels_all.copy()
+            for _t, _l in zip(_targets, _labels):
+                targets[labels_all==_l] = _t
+        assert not np.any(targets==labels_all)
+        return targets
+
+    def dataset_attack(self, model, dataset, criterion):
+        success = False
+        for s_idx in random.sample(range(len(dataset)), len(dataset)):
+            image, _ = dataset[s_idx]
+            with torch.no_grad():
+                logit = model(image[None].to(self.device))[0]
+            if criterion(image[None], logit[None])[0]:
+                success = True
+                break
+        assert success
+        return image[None]
 
     def main(self, config, verbose=True):
         if verbose:
@@ -293,21 +158,34 @@ class AttackJob(BaseJob):
 
         # load model
         saved = torch.load(config['model_pth'])
-        model = saved['model']
+        task, model = saved['task'], saved['model']
         model.eval().to(self.device)
         fmodel = fb.PyTorchModel(model, bounds=(0, 1))
 
         # prepare testing dataset
-        kwargs = {'task': saved['task'], 'datasets_dir': self.datasets_dir}
-        if 'grayscale' in saved:
-            kwargs['grayscale'] = saved['grayscale']
-        dataset = prepare_datasets(**kwargs)
+        dataset_train, _, dataset_test = prepare_datasets(
+            task, self.datasets_dir, split_ratio=1,
+            )
 
-        # prepare batch for attack
-        images, labels, criterion = self.prepare_batch(dataset, **config)
+        # prepare single-sample batch for attack
+        sample_idx = config['sample_idx']
+        image, label = dataset_test[sample_idx]
+        images = image[None].to(self.device)
+        labels = torch.tensor([label], dtype=torch.long, device=self.device)
         with torch.no_grad():
-            logits = model(images)
-            _, predicts = logits.max(dim=1)
+            probs = torch.nn.functional.softmax(model(images), dim=1)
+            prob, pred = probs.max(dim=1)
+        prob_raw, pred_raw = prob.item(), pred.item()
+
+        # prepare criterion
+        if config['targeted']:
+            targets = self.shuffled_targets(
+                dataset_test.targets, config['shuffle_mode'], config['shuffle_tag'],
+                )
+            targets = torch.tensor([targets[sample_idx]], dtype=torch.long, device=self.device)
+            criterion = fb.criteria.TargetedMisclassification(targets, config['overshoot'])
+        else:
+            criterion = fb.criteria.Misclassification(labels, config['overshoot'])
 
         # initialize attack
         set_seed(config['seed'])
@@ -315,9 +193,7 @@ class AttackJob(BaseJob):
         run_kwargs = {}
         if config['name']=='BB':
             starting_points = self.dataset_attack(
-                model, dataset,
-                criterion.target_classes if config['targeted'] else criterion.labels,
-                config['targeted'], config['overshoot'],
+                model, dataset_train, criterion,
                 ).to(self.device)
             run_kwargs = {'starting_points': starting_points}
 
@@ -327,337 +203,42 @@ class AttackJob(BaseJob):
         if config['eps_level'] is None:
             eps = None
         else:
-            eps = config['eps_level']*EPS_RESOL[config['metric']]
+            if config['metric']=='L2':
+                eps_max = IMG_SIZES[task]**0.5/10
+            if config['metric']=='LI':
+                eps_max = 0.5
+            eps = config['eps_level']/100*eps_max
         _, advs, successes = attack(fmodel, images, criterion, epsilons=eps, **run_kwargs)
-        dists = attack.distance(images, advs)
-        advs = advs.cpu().numpy().copy()
-        successes = successes.cpu().numpy().copy()
-        dists = dists.cpu().numpy().copy()
+        dist = attack.distance(images, advs).item()
+        success = successes.item()
 
-        images = images.cpu().numpy()
-        predicts, labels = predicts.cpu().numpy(), labels.cpu().numpy()
+        with torch.no_grad():
+            probs = torch.nn.functional.softmax(model(advs), dim=1)
+            prob, pred = probs.max(dim=1)
+        prob_adv, pred_adv = prob.item(), pred.item()
+        adv = advs[0].cpu().numpy()
 
         if verbose:
             toc = time.time()
-            if eps is None:
-                assert np.all(successes)
-                print('mean distance: {:.3f} ({})'.format(dists.mean(), time_str(toc-tic)))
-            else:
-                assert np.all(dists<=eps*1.1)
-                print('success rate: {:7.2%} ({})'.format(successes.mean(), time_str(toc-tic)))
+            print('eps: {:.4f}, attack {} ({})'.format(
+                dist, 'successful' if success else 'failed',
+                time_str(toc-tic),
+                ))
 
         result = {
-            'advs': advs,
-            'predicts': predicts,
-            'labels': labels,
-            'successes': successes,
-            'dists': dists,
+            'label': label,
+            'prob_raw': prob_raw, 'pred_raw': pred_raw,
+            'adv': adv,
+            'dist': dist, 'success': success,
+            'prob_adv': prob_adv, 'pred_adv': pred_adv,
             }
         preview = {
-            'predicts': predicts,
-            'labels': labels,
-            'successes': successes,
-            'dists': dists,
+            'label': label,
+            'prob_raw': prob_raw, 'pred_raw': pred_raw,
+            'dist': dist, 'success': success,
+            'prob_adv': prob_adv, 'pred_adv': pred_adv,
             }
         return result, preview
-
-    def best_attack(self, model_pth, sample_idx, metric='L2', targeted=False,
-                    overshoot=0.01, shuffle_mode='elm', shuffle_tag=0):
-        batch_idx = sample_idx//AttackJob.BATCH_SIZE
-        sample_idx = sample_idx%AttackJob.BATCH_SIZE
-        cond = {
-            'model_pth': model_pth,
-            'metric': metric,
-            'targeted': targeted,
-            'eps_level': None,
-            'overshoot': overshoot,
-            'batch_idx': batch_idx,
-            }
-        if targeted:
-            cond.update({
-                'shuffle_mode': shuffle_mode,
-                'shuffle_tag': shuffle_tag,
-                })
-        min_dist, best_key = None, None
-        for key, config in self.conditioned(cond):
-            preview = self.previews[key]
-            _dists = preview['dists']
-            if min_dist is None or min_dist>_dists[sample_idx]:
-                min_dist = _dists[sample_idx]
-                best_key = key
-        result = self.results[best_key]
-        best_adv = result['advs'][sample_idx]
-        return min_dist, best_adv
-
-    def pool_results(self, model_pth, metric='L2', targeted=False, eps=None,
-                     overshoot=0.01, *, max_batch_num=None, preview_only=False):
-        r"""Pools the results for one model.
-
-        Args
-        ----
-        model_pth: str
-            The path of the model file, which can be loaded by `torch.load`.
-        metric: str
-            The adversarial metric.
-        targeted: bool
-            Whether the attack is targeted.
-        eps: float
-            The attack size.
-        overshoot: float
-            The overshoot parameter.
-        max_batch_num: int
-            The maximum number of batches to gather. Gather all available
-            results when `max_batch_num` is ``None``.
-        preview: bool
-            Whether to pool previews only.
-
-        Returns
-        -------
-        batch_idxs: list
-            The batch indices that adversarial examples are calculated with at
-            least one attack.
-        advs: (N, C, H, W), array_like
-            The adversarial examples.
-        successes: (N,), array_like
-            Whether attack is successful for each example.
-        dists: (N,), array_like
-            The distance between adversarial examples and the original images.
-
-        """
-        if eps is None:
-            eps_level = None
-        else:
-            eps_level = int(eps/EPS_RESOL[metric])
-        cond = {
-            'model_pth': model_pth,
-            'metric': metric,
-            'targeted': targeted,
-            'eps_level': eps_level,
-            'overshoot': overshoot,
-            }
-
-        successes, dists, keys = {}, {}, {}
-        batch_idxs = []
-        for key, config in self.conditioned(cond):
-            batch_idx = config['batch_idx']
-            preview = self.previews[key]
-            _successes, _dists = preview['successes'].copy(), preview['dists'].copy()
-            _keys = np.array([key]*len(_successes), dtype=object)
-            if batch_idx in batch_idxs:
-                if eps is None:
-                    idxs, = np.nonzero(_dists<dists[batch_idx])
-                else:
-                    idxs, = np.nonzero(_successes.astype(float)>successes[batch_idx].astype(float))
-                successes[batch_idx][idxs] = _successes[idxs]
-                dists[batch_idx][idxs] = _dists[idxs]
-                keys[batch_idx][idxs] = _keys[idxs]
-            else:
-                successes[batch_idx] = _successes
-                dists[batch_idx] = _dists
-                keys[batch_idx] = _keys
-                batch_idxs.append(batch_idx)
-            if max_batch_num is not None and len(batch_idxs)==max_batch_num:
-                break
-
-        if not preview_only:
-            advs = {}
-            for batch_idx in batch_idxs:
-                for key in np.unique(keys[batch_idx]):
-                    result = self.results[key]
-                    _advs = result['advs']
-                    if batch_idx not in advs:
-                        advs[batch_idx] = np.empty(_advs.shape)
-                    idxs, = np.nonzero(keys[batch_idx]==key)
-                    advs[batch_idx][idxs] = _advs[idxs]
-
-        if batch_idxs:
-            sample_idxs = []
-            for batch_idx in batch_idxs:
-                idx_min = AttackJob.BATCH_SIZE*batch_idx
-                idx_max = idx_min+len(successes[batch_idx])
-                sample_idxs += list(range(idx_min, idx_max))
-            successes = np.concatenate([successes[batch_idx] for batch_idx in batch_idxs])
-            dists = np.concatenate([dists[batch_idx] for batch_idx in batch_idxs])
-            if preview_only:
-                advs = None
-            else:
-                advs = np.concatenate([advs[batch_idx] for batch_idx in batch_idxs])
-            return sample_idxs, successes, dists, advs
-        else:
-            return [], np.empty((0,), bool), np.empty((0,), float), None
-
-    def shared_idxs(self, model_pths, margin=0.1, **kwargs):
-        s_idxs = None
-        for model_pth in model_pths:
-            _s_idxs, _, _dists, _ = self.pool_results(model_pth, preview_only=True, **kwargs)
-            _s_idxs = set(np.array(_s_idxs)[(_dists>np.quantile(_dists, margin))&(_dists<np.quantile(_dists, 1-margin))])
-            if s_idxs is None:
-                s_idxs = _s_idxs
-            else:
-                s_idxs = s_idxs&_s_idxs
-        s_idxs = list(s_idxs)
-        return s_idxs
-
-    def gather_images(self, dataset, model_pths, s_idxs, **kwargs):
-        images, labels = [], []
-        for s_idx in s_idxs:
-            image, label = dataset[s_idx]
-            images.append(image.numpy())
-            labels.append(label)
-        images, labels = np.stack(images), np.stack(labels)
-
-        advs, predicts = [], []
-        for model_pth in model_pths:
-            _advs = np.stack([self.best_attack(model_pth, s_idx, **kwargs)[1] for s_idx in s_idxs])
-            advs.append(_advs)
-
-            model = torch.load(model_pth)['model']
-            model.eval().to(self.device)
-            with torch.no_grad():
-                logits = model(torch.tensor(_advs, dtype=torch.float, device=self.device)).cpu()
-                _, _predicts = logits.max(dim=1)
-            predicts.append(_predicts.numpy())
-        advs, predicts = np.stack(advs), np.stack(predicts)
-
-        diffs = advs-images
-        return images, labels, advs, predicts, diffs
-
-    def plot_examples(self, axes, model_pths, sample_num, shared_cmap=True, margin=0.2, **kwargs):
-        assert axes.shape==(1+2*len(model_pths), sample_num)
-
-        task = None
-        for model_pth in model_pths:
-            if task is None:
-                task = torch.load(model_pth)['task']
-            else:
-                assert task==torch.load(model_pth)['task']
-        dataset = prepare_datasets(task, self.datasets_dir)
-
-        s_idxs = self.shared_idxs(model_pths, margin=margin, **kwargs)
-        s_idxs = random.sample(s_idxs, sample_num)
-        images, labels, advs, predicts, diffs = self.gather_images(
-            dataset, model_pths, s_idxs, **kwargs
-            )
-
-        is_rgb = images.shape[1]==3
-        for i in range(sample_num):
-            if is_rgb:
-                axes[0, i].imshow(images[i].transpose(1, 2, 0))
-            else:
-                axes[0, i].imshow(images[i, 0], cmap='gray')
-            axes[0, i].set_title(dataset.class_names[labels[i]])
-        vmax = np.abs(diffs).max()
-        for j in range(len(model_pths)):
-            if not shared_cmap:
-                vmax = np.abs(diffs[j]).max()
-            for i in range(sample_num):
-                if is_rgb:
-                    axes[2*j+1, i].imshow(advs[j, i].transpose(1, 2, 0))
-                else:
-                    axes[2*j+1, i].imshow(advs[j, i, 0], cmap='gray')
-                axes[2*j+1, i].set_title(dataset.class_names[predicts[j, i]])
-                if is_rgb:
-                    axes[2*j+2, i].imshow((diffs[j, i].transpose(1, 2, 0)+vmax)/(2*vmax))
-                else:
-                    axes[2*j+2, i].imshow(diffs[j, i, 0], vmin=-vmax, vmax=vmax, cmap='bwr')
-        for ax in axes.ravel():
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-    def summarize(self, model_pths, metric='L2', targeted=False, eps=None, overshoot=0.01, max_batch_num=None):
-        r"""Summarizes a list of models.
-
-        Args
-        ----
-        model_pths: list
-            A list of model paths, each of which can be loaded by `torch.load`.
-        metric: str
-            The adversarial metric.
-        targeted: bool
-            Whether the attack is targeted.
-        eps: float
-            The attack size.
-        overshoot: float
-            The overshoot parameter.
-        max_batch_num: int
-            The maximum number of batches to gather. Gather all available
-            results when `max_batch_num` is ``None``.
-
-        Returns
-        -------
-        success_rates: (model_num,), array_like
-            The success rates of attacking each model, only valid when `eps` is
-            not ``None``.
-        dist_percentiles: (model_num, 101), array_like
-            The distance percentiles of each model, only valid when `eps` is
-            ``None``.
-
-        Examples
-        --------
-        >>> success_rates, _ = job.summarize(model_pths, 'L2', False, 0.5)
-
-        >>> _, dist_percentiles = job.summarize(model_pths, 'LI', True, None)
-
-        """
-        success_rates, dist_percentiles = [], []
-        for model_pth in model_pths:
-            try:
-                _, successes, dists, _ = self.pool_results(
-                    model_pth, metric, targeted, eps, overshoot,
-                    max_batch_num=max_batch_num, preview_only=True,
-                    )
-            except:
-                continue
-            success_rates.append(successes.mean())
-            dist_percentiles.append(np.percentile(dists, np.arange(101)))
-        success_rates = np.array(success_rates)
-        dist_percentiles = np.array(dist_percentiles).reshape(-1, 101) # reshape for empty array
-        return success_rates, dist_percentiles
-
-    def plot_perturbation_distribution(self, ax, groups, **kwargs):
-        dists = {}
-        for tag, model_pths, _ in groups:
-            dists[tag] = []
-            for model_pth in model_pths:
-                _, _, _dists, _ = self.pool_results(model_pth, preview_only=True, **kwargs)
-                dists[tag].append(_dists)
-            dists[tag] = np.concatenate(dists[tag])
-        tags = [tag for tag, *_ in groups]
-        ax.boxplot([dists[tag] for tag in tags], vert=False, sym='', labels=tags)
-        ax.set_ylim(ax.get_ylim()[::-1])
-        ax.set_xlabel('minimum perturbation')
-
-
-    def plot_comparison(self, ax, groups, dist_percentiles):
-        r"""Plots comparison of groups.
-
-        Args
-        ----
-        ax: matplot axis
-            The axis for plotting.
-        groups: list
-            Each item is a tuple of `(tag, model_pths, color)`. `tag` is the
-            label for the group, `model_pths` is the list of model pths and
-            `color` is a color tuple of shape `(3,)`.
-        dist_percentiles: list
-            Each item is a dictionary returned by `summarize`.
-
-        """
-        p_ticks = np.arange(101)
-        lines, legends = [], []
-        for i, (tag, _, color) in enumerate(groups):
-            d_mean = np.mean(dist_percentiles[i], axis=0)
-            d_std = np.std(dist_percentiles[i], axis=0)
-            idxs = (d_mean>0)&(p_ticks<=98)
-            h, = ax.plot(d_mean[idxs], p_ticks[idxs], color=color)
-            ax.fill_betweenx(
-                p_ticks[idxs], d_mean[idxs]-d_std[idxs], d_mean[idxs]+d_std[idxs],
-                color=color, alpha=0.2,
-                )
-            lines.append(h)
-            legends.append(tag)
-        ax.legend(lines, legends)
-        ax.set_ylabel('success rate (%)')
 
 
 if __name__=='__main__':
@@ -666,27 +247,36 @@ if __name__=='__main__':
     parser.add_argument('--datasets_dir', default='datasets')
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
-    parser.add_argument('--max_seed', default=100, type=int)
-    parser.add_argument('--batch_num', default=50, type=int)
+    parser.add_argument('--max_seed', default=50, type=int)
+    parser.add_argument('--sample_num', default=1000, type=int)
     args = parser.parse_args()
 
     if args.spec_pth is None:
-        export_dir = os.path.join(args.store_dir, 'models', 'exported')
-        assert os.path.exists(export_dir), "directory of exported models not found"
-        search_spec = {
-            'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')],
-            'seed': list(range(args.max_seed)),
-            'metric': METRICS,
-            'name': ['BB'],
-            'targeted': [False, True],
-            'eps': [None],
-            'batch_idx': list(range(args.batch_num)),
-            }
+        search_spec = {}
     else:
         with open(args.spec_pth, 'rb') as f:
             search_spec = pickle.load(f)
 
+    if 'model_pth' not in search_spec:
+        export_dir = '/'.joint([args.store_dir, 'models'])
+        assert os.path.exists(export_dir), "directory of models not found"
+        search_spec['model_pth'] = [
+            '/'.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')
+            ]
+    if 'metric' not in search_spec:
+        search_spec['metric'] = METRICS
+    if 'eps_level' not in search_spec:
+        search_spec['eps_level'] = [None]+list(range(100))
+    if 'targeted' not in search_spec:
+        search_spec['targeted'] = [False, True]
+    if 'name' not in search_spec:
+        search_spec['name'] = NAMES
+    if 'sample_idx' not in search_spec:
+        search_spec['sample_idx'] = list(range(args.sample_num))
+    if 'seed' not in search_spec:
+        search_spec['seed'] = list(range(args.max_seed))
+
     job = AttackJob(
-        args.store_dir, args.datasets_dir, args.device, args.worker_num
+        args.store_dir, args.datasets_dir, args.device, args.worker_num,
         )
     job.random_search(search_spec, args.process_num, args.max_wait, args.tolerance)
