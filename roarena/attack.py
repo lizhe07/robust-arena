@@ -163,13 +163,11 @@ class AttackJob(BaseJob):
         fmodel = fb.PyTorchModel(model, bounds=(0, 1))
 
         # prepare testing dataset
-        dataset_train, _, dataset_test = prepare_datasets(
-            task, self.datasets_dir, split_ratio=1,
-            )
+        dataset = prepare_datasets(task, self.datasets_dir)
 
         # prepare single-sample batch for attack
         sample_idx = config['sample_idx']
-        image, label = dataset_test[sample_idx]
+        image, label = dataset[sample_idx]
         images = image[None].to(self.device)
         labels = torch.tensor([label], dtype=torch.long, device=self.device)
         with torch.no_grad():
@@ -180,7 +178,7 @@ class AttackJob(BaseJob):
         # prepare criterion
         if config['targeted']:
             targets = self.shuffled_targets(
-                dataset_test.targets, config['shuffle_mode'], config['shuffle_tag'],
+                dataset.targets, config['shuffle_mode'], config['shuffle_tag'],
                 )
             targets = torch.tensor([targets[sample_idx]], dtype=torch.long, device=self.device)
             criterion = fb.criteria.TargetedMisclassification(targets, config['overshoot'])
@@ -193,7 +191,7 @@ class AttackJob(BaseJob):
         run_kwargs = {}
         if config['name']=='BB':
             starting_points = self.dataset_attack(
-                model, dataset_train, criterion,
+                model, dataset, criterion,
                 ).to(self.device)
             run_kwargs = {'starting_points': starting_points}
 
