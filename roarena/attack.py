@@ -188,7 +188,7 @@ class AttackJob(BaseJob):
             criterion = fb.criteria.Misclassification(labels, config['overshoot'])
 
         # initialize attack
-        set_seed(config['seed'])
+        set_seed(config['seed']+config['sample_idx'])
         attack = ATTACKS[config['metric']][config['name']]
         run_kwargs = {}
         if config['name']=='BB':
