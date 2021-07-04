@@ -73,7 +73,7 @@ class AttackJob(BaseJob):
         parser.add_argument('--model_pth', help="path to the model")
         parser.add_argument('--metric', default='LI', choices=METRICS,
                             help="perturbation metric")
-        parser.add_argument('--eps_level', type=int, choices=EPS_LEVELS),
+        parser.add_argument('--eps_level', type=int, choices=EPS_LEVELS,
                             help="integer for epsilon [0, 100)")
         parser.add_argument('--targeted', action='store_true',
                             help="whether the attack is targeted")
