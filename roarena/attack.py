@@ -258,7 +258,7 @@ if __name__=='__main__':
             search_spec = pickle.load(f)
 
     if 'model_pth' not in search_spec:
-        export_dir = '/'.joint([args.store_dir, 'models'])
+        export_dir = '/'.join([args.store_dir, 'models'])
         assert os.path.exists(export_dir), "directory of models not found"
         search_spec['model_pth'] = [
             '/'.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')
