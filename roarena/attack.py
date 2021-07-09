@@ -282,7 +282,7 @@ class AttackJob(BaseJob):
         return result, preview
 
     def best_attack(self, model_pth, sample_idx, metric, targeted, *,
-                    min_prob=None, max_dist=None,
+                    min_prob=None, max_dist=None, names=None,
                     shuffle_mode='elm', shuffle_tag=0, preview_only=True):
         r"""Returns the best attack found so far.
 
@@ -305,6 +305,8 @@ class AttackJob(BaseJob):
             The minimum probability requirement of an adversarial example.
         max_dist: float
             The maximum perturbation budget of an adversarial example.
+        names: list of str
+            The attacks will be considered.
         shuffle_mode: str
             The shuffle mode of targeted attack labels.
         shuffle_tag: int
@@ -344,6 +346,8 @@ class AttackJob(BaseJob):
         if max_dist is not None:
             assert min_prob is None
             max_prob = None
+        if names is None:
+            names = NAMES
         cond = {
             'model_pth': model_pth,
             'sample_idx': sample_idx,
@@ -355,13 +359,11 @@ class AttackJob(BaseJob):
                 'shuffle_mode': shuffle_mode,
                 'shuffle_tag': shuffle_tag,
                 })
-        counts, best_key = {}, None
+        counts, best_key = dict((name, 0) for name in names), None
         for key, config in self.conditioned(cond):
-            name = config['name']
-            if name in counts:
-                counts[name] += 1
-            else:
-                counts[name] = 1
+            if config['name'] not in names:
+                continue
+            counts[config['name']] += 1
             preview = self.previews[key]
             if preview['success']:
                 if min_prob is not None and preview['prob_adv']>=min_prob and (min_dist is None or min_dist>preview['dist']):
