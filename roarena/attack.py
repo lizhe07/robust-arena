@@ -15,7 +15,7 @@ from jarvis.utils import job_parser, get_seed, set_seed, time_str
 
 from . import DEVICE, WORKER_NUM
 
-EPS_LEVELS = list(range(1, 101))
+EPS_LEVELS = list(range(1, 101, 4))
 METRICS = ['L2', 'LI']
 NAMES = ['PGD', 'BI', 'DF', 'BB']
 ATTACKS = {
@@ -391,6 +391,7 @@ if __name__=='__main__':
     parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
     parser.add_argument('--max_seed', default=50, type=int)
     parser.add_argument('--sample_num', default=1000, type=int)
+    parser.add_argument('--models_dir')
     args = parser.parse_args()
 
     if args.spec_pth is None:
@@ -400,7 +401,7 @@ if __name__=='__main__':
             search_spec = pickle.load(f)
 
     if 'model_pth' not in search_spec:
-        export_dir = '/'.join([args.store_dir, 'models'])
+        export_dir = '/'.join([args.store_dir, 'models']) if args.models_dir is None else args.models_dir
         assert os.path.exists(export_dir), "directory of models not found"
         search_spec['model_pth'] = [
             '/'.join([export_dir, f]) for f in os.listdir(export_dir) if f.endswith('.pt')
