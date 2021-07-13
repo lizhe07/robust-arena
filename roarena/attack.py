@@ -63,6 +63,9 @@ class AttackJob(BaseJob):
             super(AttackJob, self).__init__(**kwargs)
         else:
             super(AttackJob, self).__init__(os.path.join(store_dir, 'attacks'), **kwargs)
+        for axv in [self.configs, self.stats, self.previews]:
+            if axv.store_dir is not None:
+                axv.pause = 2.
         self.datasets_dir = datasets_dir
         self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
         self.worker_num = worker_num
