@@ -5,7 +5,7 @@ Created on Thu Jul 30 14:33:23 2020
 @author: Zhe
 """
 
-__version__ = '0.5.0'
+__version__ = '0.5.1'
 
 DEVICE = 'cuda'
 BATCH_SIZE = 200
