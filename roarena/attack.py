@@ -211,22 +211,18 @@ class AttackJob(BaseJob):
         if config['metric']=='LI':
             attack = fb.attacks.LinfProjectedGradientDescentAttack()
             eps_max = 0.5
-        advs_pgd = []
+        advs_pgd, successes_pgd = [], []
         for eps in np.arange(1, EPS_NUM+1)/EPS_NUM*eps_max:
-            _, advs, _ = attack(fmodel, images, criterion, epsilons=eps)
+            _, advs, successes = attack(fmodel, images, criterion, epsilons=eps)
             advs_pgd.append(advs)
+            successes_pgd.append(successes)
         advs_pgd = torch.cat(advs_pgd)
+        successes_pgd = torch.cat(successes_pgd)
         dists_pgd = attack.distance(images.expand(EPS_NUM, -1, -1, -1), advs_pgd)
         with torch.no_grad():
             logits_pgd = model(advs_pgd)
         probs_pgd = torch.nn.functional.softmax(logits_pgd, dim=1)
         probs_pgd, preds_pgd = probs_pgd.max(dim=1)
-        successes_pgd = []
-        for overshoot in OVERSHOOTS:
-            criterion.overshoot = overshoot
-            _successes = torch.cat([criterion(adv[None], logit[None]) for adv, logit in zip(advs_pgd, logits_pgd)])
-            successes_pgd.append(_successes)
-        successes_pgd = torch.stack(successes_pgd)
         if verbose:
             toc = time.time()
             print('PGD attacks for {} epsilons performed ({})'.format(
@@ -264,106 +260,137 @@ class AttackJob(BaseJob):
 
         result = {
             'label_raw': label, 'prob_raw': prob_raw, 'pred_raw': pred_raw,
+            'target': targets.item() if config['targeted'] else None,
             'advs_pgd': advs_pgd.cpu().numpy(), # (EPS_NUM, C, H, W)
+            'successes_pgd': successes_pgd.cpu().numpy(), # (EPS_NUM,)
             'dists_pgd': dists_pgd.cpu().numpy(), # (EPS_NUM,)
             'probs_pgd': probs_pgd.cpu().numpy(), # (EPS_NUM,)
             'preds_pgd': preds_pgd.cpu().numpy(), # (EPS_NUM,)
-            'successes_pgd': successes_pgd.cpu().numpy(), # (OVERSHOOT_NUM, EPS_NUM)
             'advs_bb': advs_bb.cpu().numpy(), # (OVERSHOOT_NUM, C, H, W)
+            'successes_bb': successes_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
             'dists_bb': dists_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
             'probs_bb': probs_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
             'preds_bb': preds_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            'successes_bb': successes_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
             }
         preview = {
             'label_raw': label, 'prob_raw': prob_raw, 'pred_raw': pred_raw,
+            'target': targets.item() if config['targeted'] else None,
+            'successes_pgd': successes_pgd.cpu().numpy(), # (EPS_NUM,)
             'dists_pgd': dists_pgd.cpu().numpy(), # (EPS_NUM,)
             'probs_pgd': probs_pgd.cpu().numpy(), # (EPS_NUM,)
             'preds_pgd': preds_pgd.cpu().numpy(), # (EPS_NUM,)
-            'successes_pgd': successes_pgd.cpu().numpy(), # (OVERSHOOT_NUM, EPS_NUM)
+            'successes_bb': successes_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
             'dists_bb': dists_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
             'probs_bb': probs_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
             'preds_bb': preds_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            'successes_bb': successes_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
             }
         return result, preview
 
-    # def _get_default_arg(self, min_probs, max_dists, names):
-    #     if min_probs is not None:
-    #         assert max_dists is None
-    #         if isinstance(min_probs, float):
-    #             min_probs = [min_probs]
-    #         assert isinstance(min_probs, list)
-    #     if max_dists is not None:
-    #         assert min_probs is None
-    #         if isinstance(max_dists, (int, float)):
-    #             max_dists = [1.*max_dists]
-    #         assert isinstance(max_dists, list)
-    #     if names is None:
-    #         names = NAMES
-    #     return min_probs, max_dists, names
+    def _get_default_arg(self, min_probs, max_dists):
+        if min_probs is not None:
+            assert max_dists is None
+            if isinstance(min_probs, float):
+                min_probs = [min_probs]
+            assert isinstance(min_probs, list)
+        if max_dists is not None:
+            assert min_probs is None
+            if isinstance(max_dists, (int, float)):
+                max_dists = [1.*max_dists]
+            assert isinstance(max_dists, list)
+        return min_probs, max_dists
 
-    # def fetch_best_attacks(
-    #         self, model_pth, metric, targeted, sample_idxs, *,
-    #         min_probs=None, max_dists=None, names=None,
-    #         shuffle_mode='elm', shuffle_tag=0,
-    #         ):
-    #     r"""Returns the best attacks found so far.
+    def _best_keys(
+            self, model_pth, metric, targeted, sample_idxs, *,
+            min_probs=None, max_dists=None,
+            shuffle_mode='elm', shuffle_tag=0,
+            ):
+        r"""Returns the best attacks found so far.
 
-    #     Depending on which of `min_probs` and `max_dists` are provided, the
-    #     best attack can either be the minimum perturbed example given a minimum
-    #     probability requirement, or the most confident example given a maximum
-    #     perturbation budget.
+        Depending on which of `min_probs` and `max_dists` are provided, the
+        best attack can either be the minimum perturbed example given a minimum
+        probability requirement, or the most confident example given a maximum
+        perturbation budget.
 
-    #     Args
-    #     ----
-    #     model_pth: str
-    #         The path to saved model.
-    #     metric: str
-    #         Perturbation metric, can be ``'LI'`` or ``'L2'``.
-    #     targeted: bool
-    #         Whether the attack is targeted or not.
-    #     sample_idx: int
-    #         The indices of samples to be attacked.
-    #     min_probs: float or list of floats
-    #         The minimum probability requirement of an adversarial example. If a
-    #         single value is provided, it will be treated as a list of length 1.
-    #     max_dists: float or list of floats
-    #         The maximum perturbation budget of an adversarial example. If a
-    #         single vlaue is provided, it will be treated as a list of length 1.
-    #     names: list of str
-    #         The attacks will be considered.
-    #     shuffle_mode: str
-    #         The shuffle mode of targeted attack labels.
-    #     shuffle_tag: int
-    #         The shuffle tag of targeted attack labels.
+        Args
+        ----
+        model_pth: str
+            The path to saved model.
+        metric: str
+            Perturbation metric, can be ``'LI'`` or ``'L2'``.
+        targeted: bool
+            Whether the attack is targeted or not.
+        sample_idx: int
+            The indices of samples to be attacked.
+        min_probs: float or list of floats
+            The minimum probability requirement of an adversarial example. If a
+            single value is provided, it will be treated as a list of length 1.
+        max_dists: float or list of floats
+            The maximum perturbation budget of an adversarial example. If a
+            single vlaue is provided, it will be treated as a list of length 1.
+        names: list of str
+            The attacks will be considered.
+        shuffle_mode: str
+            The shuffle mode of targeted attack labels.
+        shuffle_tag: int
+            The shuffle tag of targeted attack labels.
 
-    #     Returns
-    #     -------
-    #     try_counts: dict
-    #         The number of attacks tried so far. The keys of `try_counts` are
-    #         `names`, and each value is an array of the same length as
-    #         `sample_idxs`.
-    #     best_keys: ndarray, (*, len(sample_idxs))
-    #         The best key for each sample and each `min_prob` or `max_dist`.
-    #     min_dists or max_probs: ndarray, (*, len(sample_idxs))
-    #         The perturbation size or the prediction probability of the best
-    #         attacks found, for each `min_prob` or `max_dist`.
+        Returns
+        -------
+        try_counts: dict
+            The number of attacks tried so far. The keys of `try_counts` are
+            `names`, and each value is an array of the same length as
+            `sample_idxs`.
+        best_keys: ndarray, (*, len(sample_idxs))
+            The best key for each sample and each `min_prob` or `max_dist`.
+        min_dists or max_probs: ndarray, (*, len(sample_idxs))
+            The perturbation size or the prediction probability of the best
+            attacks found, for each `min_prob` or `max_dist`.
 
-    #     Example
-    #     -------
-    #     >>> try_counts, best_keys, min_dists = job.best_attack(
-    #             model_pth, metric, targeted, sample_idxs,
-    #             min_probs=[0.1, 0.5, 0.9],
-    #             )
-    #     >>> try_counts, best_keys, max_probs = job.best_attack(
-    #             model_pth, metric, targeted, sample_idxs,
-    #             max_dists=0.03, names=['PGD', 'BB'],
-    #             )
+        Example
+        -------
+        >>> try_counts, best_keys, min_dists = job.best_attack(
+                model_pth, metric, targeted, sample_idxs,
+                min_probs=[0.1, 0.5, 0.9],
+                )
+        >>> try_counts, best_keys, max_probs = job.best_attack(
+                model_pth, metric, targeted, sample_idxs,
+                max_dists=0.03, names=['PGD', 'BB'],
+                )
 
-    #     """
-    #     assert self.readonly, "the job needs to be read-only"
-    #     min_probs, max_dists, names = self._get_default_arg(min_probs, max_dists, names)
+        """
+        assert self.readonly, "the job needs to be read-only"
+        try_counts = np.zeros((len(sample_idxs),), dtype=float)
+        if min_probs is not None:
+            best_keys = np.full((len(min_probs), len(sample_idxs)), None, dtype=object)
+            min_dists = np.full((len(min_probs), len(sample_idxs)), np.inf, dtype=float)
+        if max_dists is not None:
+            best_keys = np.full((len(max_dists), len(sample_idxs)), None, dtype=object)
+            max_probs = np.full((len(max_dists), len(sample_idxs)), 0, dtype=float)
+
+        cond = {
+            'model_pth': model_pth,
+            'metric': metric,
+            'targeted': targeted,
+            }
+        if targeted:
+            cond.update({
+                'shuffle_mode': shuffle_mode,
+                'shuffle_tag': shuffle_tag,
+                })
+        for key, config in self.conditioned(cond):
+            sample_idx = config['sample_idx']
+            if sample_idx not in sample_idxs:
+                continue
+            j = sample_idxs.index(sample_idx)
+            try_counts[j] += 1
+            preview = self.previews[key]
+            if min_probs is not None:
+                for i, min_prob in enumerate(min_probs):
+                    idxs = preview['probs_pgd']>min_prob
+
+
+
+
 
     #     try_counts = dict((name, np.zeros((len(sample_idxs),), dtype=float)) for name in names)
     #     if min_probs is not None:
@@ -407,53 +434,53 @@ class AttackJob(BaseJob):
     #     if max_dists is not None:
     #         return try_counts, best_keys, max_probs
 
-    # def export_digest(self, model_pth, metric, targeted, sample_idxs,
-    #                   min_probs=None, max_dists=None, names=None,
-    #                   update_cache=False, digest_pth=None):
-    #     if self.store_dir is None:
-    #         self.cache_configs = Archive(hashable=True)
-    #         self.cache_results = Archive()
-    #     else:
-    #         self.cache_configs = Archive(os.path.join(self.store_dir, 'cache', 'configs'), hashable=True)
-    #         self.cache_results = Archive(os.path.join(self.store_dir, 'cache', 'results'))
-    #     min_probs, max_dists, names = self._get_default_arg(min_probs, max_dists, names)
+    def export_digest(self, model_pth, metric, targeted, sample_idxs,
+                      min_probs=None, max_dists=None,
+                      update_cache=False, digest_pth=None):
+        if self.store_dir is None:
+            self.cache_configs = Archive(hashable=True)
+            self.cache_results = Archive()
+        else:
+            self.cache_configs = Archive(os.path.join(self.store_dir, 'cache', 'configs'), hashable=True)
+            self.cache_results = Archive(os.path.join(self.store_dir, 'cache', 'results'))
+        min_probs, max_dists = self._get_default_arg(min_probs, max_dists)
 
-    #     config = {
-    #         'model_pth': model_pth, 'metric': metric, 'targeted': targeted,
-    #         'sample_idxs': list(sample_idxs),
-    #         'min_probs': min_probs, 'max_dists': max_dists, 'names': names,
-    #         }
-    #     key = self.cache_configs.add(config)
-    #     if key in self.cache_results and not update_cache:
-    #         result = self.cache_results[key]
-    #     else:
-    #         try_counts, best_keys, vals = self.fetch_best_attacks(**config)
-    #         result = {
-    #             'update_time': datetime.now(pytz.timezone('US/Central')).strftime('%m/%d/%Y %H:%M:%S %Z %z'),
-    #             'try_counts': try_counts,
-    #             'best_keys': best_keys,
-    #             }
-    #         if min_probs is not None:
-    #             result['min_dists'] = vals
-    #         if max_dists is not None:
-    #             result['max_probs'] = vals
-    #         result['configs'] = np.full(best_keys.shape, None, dtype=object)
-    #         result['advs'] = np.full(best_keys.shape, None, dtype=object)
-    #         result['probs'] = np.full(best_keys.shape, None, dtype=object)
-    #         result['preds'] = np.full(best_keys.shape, None, dtype=object)
-    #         for i in range(best_keys.shape[0]):
-    #             for j in range(best_keys.shape[1]):
-    #                 if best_keys[i, j] is not None:
-    #                     result['configs'][i, j] = self.configs[best_keys[i, j]]
-    #                     result['advs'][i, j] = self.results[best_keys[i, j]]['adv']
-    #                     result['probs'][i, j] = self.results[best_keys[i, j]]['prob_adv']
-    #                     result['preds'][i, j] = self.results[best_keys[i, j]]['pred_adv']
-    #         self.cache_results[key] = result
-    #     digest = dict(**config, **result)
-    #     if digest_pth is not None:
-    #         with open(digest_pth, 'wb') as f:
-    #             pickle.dump(digest, f)
-    #     return digest
+        config = {
+            'model_pth': model_pth, 'metric': metric, 'targeted': targeted,
+            'sample_idxs': list(sample_idxs),
+            'min_probs': min_probs, 'max_dists': max_dists,
+            }
+        key = self.cache_configs.add(config)
+        if key in self.cache_results and not update_cache:
+            result = self.cache_results[key]
+        else:
+            try_counts, best_keys, vals = self.fetch_best_attacks(**config)
+            result = {
+                'update_time': datetime.now(pytz.timezone('US/Central')).strftime('%m/%d/%Y %H:%M:%S %Z %z'),
+                'try_counts': try_counts,
+                'best_keys': best_keys,
+                }
+            if min_probs is not None:
+                result['min_dists'] = vals
+            if max_dists is not None:
+                result['max_probs'] = vals
+            result['configs'] = np.full(best_keys.shape, None, dtype=object)
+            result['advs'] = np.full(best_keys.shape, None, dtype=object)
+            result['probs'] = np.full(best_keys.shape, None, dtype=object)
+            result['preds'] = np.full(best_keys.shape, None, dtype=object)
+            for i in range(best_keys.shape[0]):
+                for j in range(best_keys.shape[1]):
+                    if best_keys[i, j] is not None:
+                        result['configs'][i, j] = self.configs[best_keys[i, j]]
+                        result['advs'][i, j] = self.results[best_keys[i, j]]['adv']
+                        result['probs'][i, j] = self.results[best_keys[i, j]]['prob_adv']
+                        result['preds'][i, j] = self.results[best_keys[i, j]]['pred_adv']
+            self.cache_results[key] = result
+        digest = dict(**config, **result)
+        if digest_pth is not None:
+            with open(digest_pth, 'wb') as f:
+                pickle.dump(digest, f)
+        return digest
 
     # def check_counts(self, try_counts, min_trys=None):
     #     if min_trys is None:
