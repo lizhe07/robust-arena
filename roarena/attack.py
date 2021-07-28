@@ -208,6 +208,8 @@ class AttackJob(BaseJob):
         idx_max = min(AttackJob.BATCH_SIZE*(batch_idx+1), len(dataset))
         for idx in range(idx_min, idx_max):
             image, label = dataset[idx]
+            if isinstance(label, torch.Tensor):
+                label = label.item()
             images.append(image)
             labels.append(torch.tensor(label, dtype=torch.long))
         images = torch.stack(images).to(self.device)
