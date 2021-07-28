@@ -127,15 +127,15 @@ class CorruptionJob(BaseJob):
             if to_grayscale:
                 t_test = transforms.Compose([t_test, transforms.Grayscale()])
             dataset = ImageFolder(
-                os.path.join(self.datasets_dir, 'Tiny-ImageNet-C', corruption, str(severity)),
+                os.path.join(self.datasets_dir, 'ImageNet-C', corruption, str(severity)),
                 transform=t_test,
                 )
-        if task=='ImageNet':
+        if task=='TinyImageNet':
             t_test = transforms.ToTensor()
             if to_grayscale:
                 t_test = transforms.Compose([t_test, transforms.Grayscale()])
             dataset = ImageFolder(
-                os.path.join(self.datasets_dir, 'ImageNet-C', corruption, str(severity)),
+                os.path.join(self.datasets_dir, 'Tiny-ImageNet-C', corruption, str(severity)),
                 transform=t_test,
                 )
         return dataset
