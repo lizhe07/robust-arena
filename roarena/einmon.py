@@ -40,7 +40,7 @@ class EinMonDataset(torch.utils.data.Dataset):
                 break
 
         idxs_low, idxs_high = np.arange(len(dataset)), np.arange(len(dataset))
-        for c in range(len(dataset.classes)):
+        for c in range(len(dataset.class_names)):
             _idxs, = np.nonzero(labels_low==c)
             idxs_high[labels_high==c] = np.random.permutation(_idxs)
 
