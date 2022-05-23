@@ -1,11 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Sep 10 20:57:18 2020
-
-@author: Zhe
-"""
-
-import os, argparse, pickle, random, time, torch
+import os, argparse, pickle, random, time, torch, json
 from datetime import datetime
 import pytz
 import numpy as np
@@ -15,7 +8,7 @@ from jarvis import BaseJob, Archive
 from jarvis.vision import prepare_datasets
 from jarvis.utils import job_parser, get_seed, set_seed, time_str
 
-from . import DEVICE, WORKER_NUM
+from . import DEVICE
 
 METRICS = ['L2', 'LI']
 IMG_SIZES = {
@@ -29,64 +22,46 @@ OVERSHOOTS = np.linspace(0, 4, 9)
 
 
 class AttackJob(BaseJob):
-    r"""Performs adversarial attacks.
+    r"""Performs adversarial attacks."""
 
-    Args
-    ----
-    store_dir: str
-        The directory for storing results. When `store_dir` is ``None``, no
-        external storage is used.
-    datasets_dir: str
-        The directory for vision datasets.
-    device: str
-        The device for computation.
-    worker_num: int
-        The worker number for data loader.
-
-    """
-    BATCH_SIZE = 20
-
-    def __init__(self, store_dir, datasets_dir, device=DEVICE, worker_num=WORKER_NUM, **kwargs):
-        if store_dir is None:
-            super(AttackJob, self).__init__(**kwargs)
-        else:
-            super(AttackJob, self).__init__(os.path.join(store_dir, 'attacks'), **kwargs)
+    def __init__(self,
+        store_dir, datasets_dir, device=DEVICE,
+        **kwargs,
+    ):
+        super(AttackJob, self).__init__(store_dir=store_dir, **kwargs)
         self.datasets_dir = datasets_dir
-        self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
-        self.worker_num = worker_num
+        self.device = device if torch.cuda.is_available() else 'cpu'
 
-    def get_config(self, arg_strs):
+    def strs2config(self, arg_strs):
         parser = argparse.ArgumentParser()
 
-        parser.add_argument('--model_pth', help="path to the model")
+        parser.add_argument('--model-path', help="path to the model")
         parser.add_argument('--metric', default='LI', choices=METRICS,
                             help="perturbation metric")
         parser.add_argument('--targeted', action='store_true',
                             help="whether the attack is targeted")
-        parser.add_argument('--shuffle_mode', default='elm', choices=['elm', 'cls'],
+        parser.add_argument('--shuffle-mode', default='elm', choices=['elm', 'cls'],
                             help="shuffle mode of targeted attack labels")
-        parser.add_argument('--shuffle_tag', default=0, type=int,
+        parser.add_argument('--shuffle-tag', default=0, type=int,
                             help="shuffule tag of targeted attack labels")
-        parser.add_argument('--sample_idx', default=0, type=int,
+        parser.add_argument('--sample-idx', default=0, type=int,
                             help="index of sample to attack")
-        parser.add_argument('--seed', default=0, type=int,
-                            help="random seed")
 
         args, _ = parser.parse_known_args(arg_strs)
 
-        assert args.model_pth is not None
+        assert args.model_path is not None
         config = {
-            'model_pth': args.model_pth,
+            'model_path': args.model_path,
             'metric': args.metric,
             'targeted': args.targeted,
             'shuffle_mode': args.shuffle_mode if args.targeted else None,
             'shuffle_tag': args.shuffle_tag if args.targeted else None,
             'sample_idx': args.sample_idx,
-            'seed': get_seed(args.seed),
-            }
+        }
         return config
 
-    def shuffled_targets(self, targets, shuffle_mode, shuffle_tag):
+    @staticmethod
+    def shuffled_targets(targets, shuffle_mode, shuffle_tag):
         r"""Returns shuffled targets for attack.
 
         Original image labels are shuffled so that wrong labels are assigned as
@@ -109,26 +84,26 @@ class AttackJob(BaseJob):
             The target class label for all images in the dataset.
 
         """
-        set_seed(shuffle_tag)
+        rng = np.random.default_rng(shuffle_tag)
         labels_all = np.array(targets)
         if shuffle_mode=='elm':
             last = labels_all.size
-            targets = np.random.permutation(labels_all)
+            targets = rng.permutation(labels_all)
             while True:
                 idxs, = np.nonzero(targets==labels_all)
                 if idxs.size>0:
                     if idxs.size<last:
                         last = idxs.size
-                        targets[np.random.permutation(idxs)] = targets[idxs]
+                        targets[rng.permutation(idxs)] = targets[idxs]
                     else:
                         last = labels_all.size
-                        targets = np.random.permutation(labels_all)
+                        targets = rng.permutation(labels_all)
                 else:
                     break
         if shuffle_mode=='cls':
             _labels = np.unique(labels_all)
             while True:
-                _targets = np.random.permutation(_labels)
+                _targets = rng.permutation(_labels)
                 if np.all(_targets!=_labels):
                     break
             targets = labels_all.copy()
@@ -157,8 +132,9 @@ class AttackJob(BaseJob):
             A single-image batch as the 'adversarial' example.
 
         """
+        rng = np.random.default_rng()
         success = False
-        for s_idx in random.sample(range(len(dataset)), len(dataset)):
+        for s_idx in rng.permutation(len(dataset)):
             image, _ = dataset[s_idx]
             image = image[None].to(self.device)
             with torch.no_grad():
@@ -169,12 +145,12 @@ class AttackJob(BaseJob):
         assert success, "no image from the dataset meets criterion"
         return image
 
-    def main(self, config, verbose=True):
-        if verbose:
+    def main(self, config, num_epochs=1, verbose=1):
+        if verbose>0:
             print(config)
 
         # load model
-        saved = torch.load(config['model_pth'])
+        saved = torch.load(config['model_path'])
         task, model = saved['task'], saved['model']
         model.eval().to(self.device)
         fmodel = fb.PyTorchModel(model, bounds=(0, 1))
@@ -196,95 +172,128 @@ class AttackJob(BaseJob):
         if config['targeted']:
             targets = self.shuffled_targets(
                 dataset.targets, config['shuffle_mode'], config['shuffle_tag'],
-                )
+            )
             targets = torch.tensor([targets[sample_idx]], dtype=torch.long, device=self.device)
             criterion = fb.criteria.TargetedMisclassification(targets)
         else:
             criterion = fb.criteria.Misclassification(labels)
 
-        # PGD attacks
-        if verbose:
+        # load checkpoint
+        try:
+            epoch, ckpt = self.load_ckpt(config)
+            if verbose>0:
+                print(f"Checkpoint (epoch {epoch}) loaded successfully.")
+        except:
+            epoch = 0
+            ckpt = {
+                'label_raw': label, 'prob_raw': prob_raw, 'pred_raw': pred_raw,
+                'target': targets.item() if config['targeted'] else None,
+            }
+        while epoch<num_epochs:
+            # PGD attacks
             tic = time.time()
-        if config['metric']=='L2':
-            attack = fb.attacks.L2ProjectedGradientDescentAttack()
-            eps_max = IMG_SIZES[task]**0.5/10
-        if config['metric']=='LI':
-            attack = fb.attacks.LinfProjectedGradientDescentAttack()
-            eps_max = 0.5
-        advs_pgd, successes_pgd = [], []
-        for eps in np.arange(1, EPS_NUM+1)/EPS_NUM*eps_max:
-            _, advs, successes = attack(fmodel, images, criterion, epsilons=eps)
-            advs_pgd.append(advs)
-            successes_pgd.append(successes)
-        advs_pgd = torch.cat(advs_pgd)
-        successes_pgd = torch.cat(successes_pgd)
-        dists_pgd = attack.distance(images.expand(EPS_NUM, -1, -1, -1), advs_pgd)
-        with torch.no_grad():
-            logits_pgd = model(advs_pgd)
-        probs_pgd = torch.nn.functional.softmax(logits_pgd, dim=1)
-        probs_pgd, preds_pgd = probs_pgd.max(dim=1)
-        if verbose:
+            if config['metric']=='L2':
+                attack = fb.attacks.L2ProjectedGradientDescentAttack()
+                eps_max = IMG_SIZES[task]**0.5/10
+            if config['metric']=='LI':
+                attack = fb.attacks.LinfProjectedGradientDescentAttack()
+                eps_max = 0.5
+            advs_pgd, successes_pgd = [], []
+            for eps in np.arange(1, EPS_NUM+1)/EPS_NUM*eps_max:
+                _, advs, successes = attack(fmodel, images, criterion, epsilons=eps)
+                advs_pgd.append(advs)
+                successes_pgd.append(successes)
+            advs_pgd = torch.cat(advs_pgd)
+            successes_pgd = torch.cat(successes_pgd)
+            dists_pgd = attack.distance(images.expand(EPS_NUM, -1, -1, -1), advs_pgd)
+            with torch.no_grad():
+                logits_pgd = model(advs_pgd)
+            probs_pgd = torch.nn.functional.softmax(logits_pgd, dim=1)
+            probs_pgd, preds_pgd = probs_pgd.max(dim=1)
             toc = time.time()
-            print('PGD attacks for {} epsilons performed ({})'.format(
-                EPS_NUM, time_str(toc-tic),
+            if verbose>0:
+                print('PGD attacks for {} epsilons performed ({})'.format(
+                    EPS_NUM, time_str(toc-tic),
                 ))
+            advs_pgd = advs_pgd.cpu().numpy() # (EPS_NUM, C, H, W)
+            successes_pgd = successes_pgd.cpu().numpy() # (EPS_NUM,)
+            dists_pgd = dists_pgd.cpu().numpy() # (EPS_NUM,)
+            probs_pgd = probs_pgd.cpu().numpy() # (EPS_NUM,)
+            preds_pgd = preds_pgd.cpu().numpy() # (EPS_NUM,)
 
-        # BB attack
-        if verbose:
+            # BB attack
             tic = time.time()
-        if config['metric']=='L2':
-            attack = fb.attacks.L2BrendelBethgeAttack()
-        if config['metric']=='LI':
-            attack = fb.attacks.LinfinityBrendelBethgeAttack()
-        advs_bb, successes_bb = [], []
-        for overshoot in OVERSHOOTS:
-            criterion.overshoot = overshoot
-            starting_points = self.dataset_attack(
-                model, dataset, criterion,
+            if config['metric']=='L2':
+                attack = fb.attacks.L2BrendelBethgeAttack()
+            if config['metric']=='LI':
+                attack = fb.attacks.LinfinityBrendelBethgeAttack()
+            advs_bb, successes_bb = [], []
+            for overshoot in OVERSHOOTS:
+                criterion.overshoot = overshoot
+                starting_points = self.dataset_attack(
+                    model, dataset, criterion,
                 ).to(self.device)
-            _, advs, successes = attack(fmodel, images, criterion, epsilons=None, starting_points=starting_points)
-            advs_bb.append(advs)
-            successes_bb.append(successes)
-        advs_bb = torch.cat(advs_bb)
-        successes_bb = torch.cat(successes_bb)
-        dists_bb = attack.distance(images.expand(len(OVERSHOOTS), -1, -1, -1), advs_bb)
-        with torch.no_grad():
-            logits_bb = model(advs_bb)
-        probs_bb = torch.nn.functional.softmax(logits_bb, dim=1)
-        probs_bb, preds_bb = probs_bb.max(dim=1)
-        if verbose:
+                _, advs, successes = attack(fmodel, images, criterion, epsilons=None, starting_points=starting_points)
+                advs_bb.append(advs)
+                successes_bb.append(successes)
+            advs_bb = torch.cat(advs_bb)
+            successes_bb = torch.cat(successes_bb)
+            dists_bb = attack.distance(images.expand(len(OVERSHOOTS), -1, -1, -1), advs_bb)
+            with torch.no_grad():
+                logits_bb = model(advs_bb)
+            probs_bb = torch.nn.functional.softmax(logits_bb, dim=1)
+            probs_bb, preds_bb = probs_bb.max(dim=1)
             toc = time.time()
-            print('BB attacks for {} overshoots performed ({})'.format(
-                len(OVERSHOOTS), time_str(toc-tic),
+            if verbose>0:
+                print('BB attacks for {} overshoots performed ({})'.format(
+                    len(OVERSHOOTS), time_str(toc-tic),
                 ))
+            advs_bb = advs_bb.cpu().numpy() # (OVERSHOOT_NUM, C, H, W)
+            successes_bb = successes_bb.cpu().numpy() # (OVERSHOOT_NUM,)
+            dists_bb = dists_bb.cpu().numpy() # (OVERSHOOT_NUM,)
+            probs_bb = probs_bb.cpu().numpy() # (OVERSHOOT_NUM,)
+            preds_bb = preds_bb.cpu().numpy() # (OVERSHOOT_NUM,)
 
-        result = {
-            'label_raw': label, 'prob_raw': prob_raw, 'pred_raw': pred_raw,
-            'target': targets.item() if config['targeted'] else None,
-            'advs_pgd': advs_pgd.cpu().numpy(), # (EPS_NUM, C, H, W)
-            'successes_pgd': successes_pgd.cpu().numpy(), # (EPS_NUM,)
-            'dists_pgd': dists_pgd.cpu().numpy(), # (EPS_NUM,)
-            'probs_pgd': probs_pgd.cpu().numpy(), # (EPS_NUM,)
-            'preds_pgd': preds_pgd.cpu().numpy(), # (EPS_NUM,)
-            'advs_bb': advs_bb.cpu().numpy(), # (OVERSHOOT_NUM, C, H, W)
-            'successes_bb': successes_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            'dists_bb': dists_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            'probs_bb': probs_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            'preds_bb': preds_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            }
-        preview = {
-            'label_raw': label, 'prob_raw': prob_raw, 'pred_raw': pred_raw,
-            'target': targets.item() if config['targeted'] else None,
-            'successes_pgd': successes_pgd.cpu().numpy(), # (EPS_NUM,)
-            'dists_pgd': dists_pgd.cpu().numpy(), # (EPS_NUM,)
-            'probs_pgd': probs_pgd.cpu().numpy(), # (EPS_NUM,)
-            'preds_pgd': preds_pgd.cpu().numpy(), # (EPS_NUM,)
-            'successes_bb': successes_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            'dists_bb': dists_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            'probs_bb': probs_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            'preds_bb': preds_bb.cpu().numpy(), # (OVERSHOOT_NUM,)
-            }
-        return result, preview
+            # update best attacks
+            epoch += 1
+            if 'advs_pgd' not in ckpt:
+                ckpt.update({
+                    'advs_pgd': advs_pgd,
+                    'successes_pgd': successes_pgd,
+                    'dists_pgd': dists_pgd,
+                    'probs_pgd': probs_pgd,
+                    'preds_pgd': preds_pgd,
+                })
+            else:
+                # success attacks with higher confidence
+                idxs = successes_pgd&(~ckpt['successes_pgd']|(probs_pgd>ckpt['probs_pgd']))
+                ckpt['advs_pgd'][idxs] = advs_pgd[idxs]
+                ckpt['successes_pgd'][idxs] = successes_pgd[idxs]
+                ckpt['dists_pgd'][idxs] = dists_pgd[idxs]
+                ckpt['probs_pgd'][idxs] = probs_pgd[idxs]
+                ckpt['preds_pgd'][idxs] = preds_pgd[idxs]
+            if 'advs_bb' not in ckpt:
+                ckpt.update({
+                    'advs_bb': advs_bb,
+                    'successes_bb': successes_bb,
+                    'dists_bb': dists_bb,
+                    'probs_bb': probs_bb,
+                    'preds_bb': preds_bb,
+                })
+            else:
+                # success attacks with smaller perturbation
+                idxs = successes_bb&(~ckpt['successes_bb']|(dists_bb<ckpt['dists_bb']))
+                ckpt['advs_bb'][idxs] = advs_bb[idxs]
+                ckpt['successes_bb'][idxs] = successes_bb[idxs]
+                ckpt['dists_bb'][idxs] = dists_bb[idxs]
+                ckpt['probs_bb'][idxs] = probs_bb[idxs]
+                ckpt['preds_bb'][idxs] = preds_bb[idxs]
+        preview = dict((key, ckpt[key]) for key in [
+            'label_raw', 'prob_raw', 'pred_raw', 'target',
+            'successes_pgd', 'dists_pgd', 'probs_pgd', 'preds_pgd',
+            'successes_bb', 'dists_bb', 'probs_bb', 'preds_bb',
+        ])
+        return ckpt, preview
 
     def _best_attacks(
             self, model_pth, metric, targeted, sample_idxs,
@@ -490,37 +499,35 @@ class AttackJob(BaseJob):
 
 if __name__=='__main__':
     parser = job_parser()
-    parser.add_argument('--store_dir', default='store')
-    parser.add_argument('--datasets_dir', default='datasets')
+    parser.add_argument('--store-dir', default='store')
+    parser.add_argument('--datasets-dir', default='datasets')
     parser.add_argument('--device', default=DEVICE)
-    parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
-    parser.add_argument('--models_dir')
-    parser.add_argument('--sample_num', default=1000, type=int)
-    parser.add_argument('--max_seed', default=50, type=int)
-    args = parser.parse_args()
+    parser.add_argument('--spec-path', default='a-tests/spec.json')
+    parser.add_argument('--num-epochs', default=1, type=int)
+    args, _ = parser.parse_known_args()
 
-    if args.spec_pth is None:
-        search_spec = {}
-    else:
-        with open(args.spec_pth, 'rb') as f:
-            search_spec = pickle.load(f)
-
-    if 'model_pth' not in search_spec:
-        export_dir = '/'.join([args.store_dir, 'models']) if args.models_dir is None else args.models_dir
-        assert os.path.exists(export_dir), "directory of models not found"
-        search_spec['model_pth'] = [
-            '/'.join([export_dir, f]) for f in os.listdir(export_dir) if f.endswith('.pt')
-            ]
-    if 'metric' not in search_spec:
-        search_spec['metric'] = METRICS
-    if 'targeted' not in search_spec:
-        search_spec['targeted'] = [False, True]
-    if 'sample_idx' not in search_spec:
-        search_spec['sample_idx'] = list(range(args.sample_num))
-    if 'seed' not in search_spec:
-        search_spec['seed'] = list(range(args.max_seed))
-
+    time.sleep(random.random()*args.max_wait)
     job = AttackJob(
-        args.store_dir, args.datasets_dir, args.device, args.worker_num,
-        )
-    job.random_search(search_spec, args.process_num, args.max_wait, args.tolerance)
+        f'{args.store_dir}/a-tests', args.datasets_dir, args.device,
+    )
+
+    try:
+        with open(f'{args.store_dir}/{args.spec.path}', 'r') as f:
+            search_spec = json.load(f)
+    except:
+        search_spec = {}
+    if search_spec.get('model-path') is None:
+        search_spec['model-path'] = [
+            f'{args.store_dir}/exported/{f}' for f in os.listdir(f'{args.store_dir}/exported') if f.endswith('.pt')
+        ]
+    if search_spec.get('metric') is None:
+        search_spec['metric'] = METRICS
+    if search_spec.get('targeted') is None:
+        search_spec['targeted'] = [False, True]
+    if search_spec.get('shuffle-mode') is None:
+        search_spec['shuffle-mode'] = ['elm', 'cls']
+    if search_spec.get('shuffle-tag') is None:
+        search_spec['shuffle-tag'] = list(range(6))
+    if search_spec.get('sample-idx') is None:
+        search_spec['sample-idx'] = list(range(1000))
+    job.grid_search(search_spec, num_epochs=args.num_epochs, num_works=args.num_works, patience=args.patience)
