@@ -190,6 +190,8 @@ class AttackJob(BaseJob):
                 'target': targets.item() if config['targeted'] else None,
             }
         while epoch<num_epochs:
+            if verbose>0:
+                print(f"Epoch {epoch}")
             # PGD attacks
             tic = time.time()
             if config['metric']=='L2':
