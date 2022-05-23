@@ -135,6 +135,10 @@ class CorruptionJob(BaseJob):
         # load model
         saved = torch.load(config['model_path'])
         model = saved['model']
+        if torch.cuda.device_count()>1:
+            if verbose>0:
+                print("Using {} GPUs".format(torch.cuda.device_count()))
+            model = torch.nn.DataParallel(model)
 
         # evaluate on common corruption dataset
         dataset = self.prepare_dataset(
@@ -233,7 +237,7 @@ if __name__=='__main__':
     parser.add_argument('--datasets-dir', default='datasets')
     parser.add_argument('--device', default=DEVICE)
     parser.add_argument('--batch-size', default=BATCH_SIZE, type=int)
-    parser.add_argument('--spec-path', default='store/c-tests/spec.json')
+    parser.add_argument('--spec-path', default='c-tests/spec.json')
     args, _ = parser.parse_known_args()
 
     time.sleep(random.random()*args.max_wait)
@@ -241,10 +245,10 @@ if __name__=='__main__':
         f'{args.store_dir}/c-tests', args.datasets_dir, args.device, args.batch_size,
     )
 
-    if os.path.exists(args.spec_path):
-        with open(args.spec.path, 'r') as f:
+    try:
+        with open(f'{args.store_dir}/{args.spec.path}', 'r') as f:
             search_spec = json.load(f)
-    else:
+    except:
         search_spec = {}
     if search_spec.get('model-path') is None:
         search_spec['model-path'] = [

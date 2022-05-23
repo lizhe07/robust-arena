@@ -1,11 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Feb 28 00:01:54 2021
-
-@author: Zhe
-"""
-
-import os, argparse, pickle, torch
+import os, argparse, pickle, torch, time, random, json
 import numpy as np
 from scipy.fft import fft2, ifft2
 
@@ -13,9 +6,9 @@ from jarvis import BaseJob
 from jarvis.vision import prepare_datasets
 from jarvis.utils import get_seed, set_seed, job_parser
 
-from . import DEVICE, BATCH_SIZE, WORKER_NUM
-
+from . import DEVICE, BATCH_SIZE, NUM_WORKERS
 ALPHAS = [0, 3, 4, 5, 6, 8, 9, 11, 13, 15, 17, 19, 22, 27, 33, 42, 57, 100]
+MAX_SEED = 6
 
 
 class EinMonDataset(torch.utils.data.Dataset):
@@ -72,45 +65,22 @@ class EinMonDataset(torch.utils.data.Dataset):
 
 class EinMonJob(BaseJob):
 
-    def __init__(self, store_dir, datasets_dir, device=DEVICE,
-                 batch_size=BATCH_SIZE, worker_num=WORKER_NUM, **kwargs):
-        if store_dir is None:
-            super(EinMonJob, self).__init__(**kwargs)
-        else:
-            super(EinMonJob, self).__init__(os.path.join(store_dir, 'em-results'), **kwargs)
+    def __init__(self,
+        store_dir, datasets_dir,
+        device=DEVICE, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS,
+        **kwargs,
+    ):
+        super(EinMonJob, self).__init__(store_dir=store_dir, **kwargs)
         self.datasets_dir = datasets_dir
-        self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
+        self.device = device if torch.cuda.is_available() else 'cpu'
         self.batch_size = batch_size
-        self.worker_num = worker_num
+        self.num_workers = num_workers
 
     def prepare_dataset(self, task, alpha, seed):
-        r"""Prepares the Einstein-Monroe dataset.
-
-        Existing datasets that mix CIFAR images with different mixing
-        frequencies are loaded.
-
-        Args
-        ----
-        task: str
-            The name of the dataset, only supports ``'CIFAR10'`` and
-            ``'CIFAR100'`` for now.
-        alpha: int
-            The normalized mixing frequency, an integeger from 0 to 100.
-        grayscale: bool
-            Whether use grayscale CIFAR images.
-
-        Returns
-        -------
-        dataset: Dataset
-            The Einstein-Monroe dataset. Each item is a tuple
-            `(image, label_low, label_high)`, with class labels for
-            low-frequency and high-frequency component.
-
-        """
+        r"""Prepares the Einstein-Monroe dataset."""
         dataset = EinMonDataset(
-            prepare_datasets(task, self.datasets_dir),
-            alpha=alpha, seed=seed,
-            )
+            prepare_datasets(task, self.datasets_dir), alpha=alpha, seed=seed,
+        )
         return dataset
 
     def evaluate(self, model, dataset):
@@ -134,7 +104,7 @@ class EinMonJob(BaseJob):
         criterion = torch.nn.CrossEntropyLoss(reduction='sum')
 
         loader = torch.utils.data.DataLoader(
-            dataset, batch_size=self.batch_size, num_workers=self.worker_num
+            dataset, batch_size=self.batch_size, num_workers=self.num_workers
             )
         loss_low, count_low = 0., 0.
         loss_high, count_high = 0., 0.
@@ -153,49 +123,51 @@ class EinMonJob(BaseJob):
         loss_high, acc_high = loss_high/len(dataset), count_high/len(dataset)
         return loss_low, acc_low, loss_high, acc_high
 
-    def get_config(self, arg_strs):
+    def strs2config(self, arg_strs):
         parser = argparse.ArgumentParser()
-
-        parser.add_argument('--model_pth')
+        parser.add_argument('--model-path')
         parser.add_argument('--seed', default=0, type=int,
                             help="random seed")
         parser.add_argument('--alpha', default=5, type=int,
                             help="mixing ratio, an integer from 0 to 100")
-
         args = parser.parse_args(arg_strs)
 
-        assert args.model_pth is not None
+        assert args.model_path is not None
         return {
-            'model_pth': args.model_pth,
+            'model_path': args.model_path,
             'seed': get_seed(args.seed),
             'alpha': args.alpha,
-            }
+        }
 
-    def main(self, config, verbose=True):
-        if verbose:
+    def main(self, config, epoch=1, verbose=1):
+        if verbose>0:
             print(config)
 
         # load model
-        saved = torch.load(config['model_pth'])
+        saved = torch.load(config['model_path'])
         model = saved['model']
+        if torch.cuda.device_count()>1:
+            if verbose>0:
+                print("Using {} GPUs".format(torch.cuda.device_count()))
+            model = torch.nn.DataParallel(model)
 
         # prepare Einstein-Monroe dataset
         dataset = self.prepare_dataset(
             saved['task'], config['alpha'], config['seed'],
-            )
+        )
 
         # evaluate model
         loss_low, acc_low, loss_high, acc_high = self.evaluate(model, dataset)
-        if verbose:
+        if verbose>0:
             print('low-frequency component\nloss: {:.4f}, acc: {:.2%}'.format(loss_low, acc_low))
             print('high-frequency component\nloss: {:.4f}, acc: {:.2%}'.format(loss_high, acc_high))
 
-        result = {
+        ckpt = {
             'loss_low': loss_low, 'acc_low': acc_low,
             'loss_high': loss_high, 'acc_high': acc_high,
-            }
+        }
         preview = {}
-        return result, preview
+        return ckpt, preview
 
     def summarize(self, model_pths, alphas):
         r"""Summarizes a list of models.
@@ -281,27 +253,33 @@ class EinMonJob(BaseJob):
 
 if __name__=='__main__':
     parser = job_parser()
-    parser.add_argument('--store_dir', default='store')
-    parser.add_argument('--datasets_dir', default='datasets')
+    parser.add_argument('--store-dir', default='store')
+    parser.add_argument('--datasets-dir', default='datasets')
     parser.add_argument('--device', default=DEVICE)
-    parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
-    parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
-    parser.add_argument('--max_seed', default=4, type=int)
-    args = parser.parse_args()
+    parser.add_argument('--batch-size', default=BATCH_SIZE, type=int)
+    parser.add_argument('--num-workers', default=NUM_WORKERS, type=int)
+    parser.add_argument('--spec-path', default='e-tests/spec.json')
+    args, _ = parser.parse_known_args()
 
-    if args.spec_pth is None:
-        export_dir = os.path.join(args.store_dir, 'models', 'exported')
-        assert os.path.exists(export_dir), "directory of exported models not found"
-        search_spec = {
-            'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')],
-            'seed': list(range(args.max_seed)),
-            'alpha': ALPHAS,
-            }
-    else:
-        with open(args.spec_pth, 'rb') as f:
-            search_spec = pickle.load(f)
-
+    time.sleep(random.random()*args.max_wait)
     job = EinMonJob(
-        args.store_dir, args.datasets_dir, args.device, args.batch_size, args.worker_num
-        )
-    job.random_search(search_spec, args.process_num, args.max_wait, args.tolerance)
+        f'{args.store_dir}/e-tests', args.datasets_dir,
+        args.device, args.batch_size, args.num_workers,
+    )
+
+    try:
+        with open(f'{args.store_dir}/{args.spec.path}', 'r') as f:
+            search_spec = json.load(f)
+    except:
+        search_spec = {}
+    if search_spec.get('model-path') is None:
+        search_spec['model-path'] = [
+            f'{args.store_dir}/exported/{f}' for f in os.listdir(f'{args.store_dir}/exported') if f.endswith('.pt')
+        ]
+    if search_spec.get('seed') is None:
+        search_spec['seed'] = list(range(MAX_SEED))
+    if search_spec.get('alpha') is None:
+        search_spec['alpha'] = ALPHAS
+    job.grid_search(
+        search_spec, num_works=args.num_works, patience=args.patience,
+    )
