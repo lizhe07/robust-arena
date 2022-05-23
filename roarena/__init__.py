@@ -1,5 +1,5 @@
 __version__ = '0.6.0'
 
 DEVICE = 'cuda'
-BATCH_SIZE = 200
-WORKER_NUM = 0
+BATCH_SIZE = 100
+NUM_WORKERS = 4

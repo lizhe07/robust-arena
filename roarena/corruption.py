@@ -1,11 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Sep 10 16:39:55 2020
-
-@author: Zhe
-"""
-
-import os, argparse, pickle, torch
+import os, argparse, torch, time, random, json
 import numpy as np
 from torchvision.datasets import ImageFolder
 from torchvision import transforms
@@ -16,7 +9,7 @@ from jarvis import BaseJob
 from jarvis.vision import evaluate, IMAGENET_TEST
 from jarvis.utils import job_parser
 
-from . import DEVICE, BATCH_SIZE, WORKER_NUM
+from . import DEVICE, BATCH_SIZE
 
 CORRUPTIONS = [
     'gaussian_noise', 'shot_noise', 'impulse_noise',
@@ -49,33 +42,30 @@ class CorruptionJob(BaseJob):
 
     """
 
-    def __init__(self, store_dir, datasets_dir, device=DEVICE,
-                 batch_size=BATCH_SIZE, worker_num=WORKER_NUM, **kwargs):
-        if store_dir is None:
-            super(CorruptionJob, self).__init__(**kwargs)
-        else:
-            super(CorruptionJob, self).__init__(os.path.join(store_dir, 'c-tests'), **kwargs)
+    def __init__(self,
+        store_dir, datasets_dir,
+        device=DEVICE, batch_size=BATCH_SIZE,
+        **kwargs,
+    ):
+        super(CorruptionJob, self).__init__(store_dir=store_dir, **kwargs)
         self.datasets_dir = datasets_dir
-        self.device = 'cuda' if device=='cuda' and torch.cuda.is_available() else 'cpu'
+        self.device = device if torch.cuda.is_available() else 'cpu'
         self.batch_size = batch_size
-        self.worker_num = worker_num
 
-    def get_config(self, arg_strs):
+    def strs2config(self, arg_strs):
         parser = argparse.ArgumentParser()
-
-        parser.add_argument('--model_pth')
+        parser.add_argument('--model-path')
         parser.add_argument('--corruption', choices=CORRUPTIONS)
         parser.add_argument('--severity', default=5, type=int)
-
         args, _ = parser.parse_known_args(arg_strs)
 
-        assert args.model_pth is not None
+        assert args.model_path is not None
         assert args.severity in SEVERITIES
         return {
-            'model_pth': args.model_pth,
+            'model_path': args.model_path,
             'corruption': args.corruption,
             'severity': args.severity,
-            }
+        }
 
     def prepare_dataset(self, task, corruption, severity):
         r"""Returns common corruption testing set.
@@ -83,9 +73,7 @@ class CorruptionJob(BaseJob):
         Args
         ----
         task: str
-            The task name, can be ``'CIFAR10'`` or ``'CIFAR100'``.
-        grayscale: bool
-            Whether to use grayscale images.
+            The task name.
         corruption: str
             The corruption name, can only be one of `CORRUPTIONS`.
         severity: int
@@ -115,12 +103,12 @@ class CorruptionJob(BaseJob):
             images = np.load(os.path.join(npy_dir, f'{corruption}.npy'))/255.
             images = torch.tensor(
                 images[(severity-1)*10000:severity*10000], dtype=torch.float
-                ).permute(0, 3, 1, 2)
+            ).permute(0, 3, 1, 2)
             if to_grayscale:
                 images = rgb_to_grayscale(images)
             labels = torch.tensor(
                 np.load(os.path.join(npy_dir, 'labels.npy'))[:10000], dtype=torch.long
-                )
+            )
             dataset = torch.utils.data.TensorDataset(images, labels)
         if task=='ImageNet':
             t_test = IMAGENET_TEST
@@ -129,7 +117,7 @@ class CorruptionJob(BaseJob):
             dataset = ImageFolder(
                 os.path.join(self.datasets_dir, 'ImageNet-C', corruption, str(severity)),
                 transform=t_test,
-                )
+            )
         if task=='TinyImageNet':
             t_test = transforms.ToTensor()
             if to_grayscale:
@@ -137,28 +125,32 @@ class CorruptionJob(BaseJob):
             dataset = ImageFolder(
                 os.path.join(self.datasets_dir, 'Tiny-ImageNet-C', corruption, str(severity)),
                 transform=t_test,
-                )
+            )
         return dataset
 
-    def main(self, config, verbose=True):
-        if verbose:
+    def main(self, config, epoch=1, verbose=1):
+        if verbose>0:
             print(config)
 
         # load model
-        saved = torch.load(config['model_pth'])
+        saved = torch.load(config['model_path'])
         model = saved['model']
+        if verbose>0:
+            print("Model loaded.")
 
         # evaluate on common corruption dataset
         dataset = self.prepare_dataset(
             saved['task'], config['corruption'], config['severity'],
-            )
+        )
+        if verbose>0:
+            print("Dataset prepared.")
         loss, acc = evaluate(
-            model, dataset, self.batch_size, self.device, self.worker_num, verbose,
-            )
+            model, dataset, self.batch_size, self.device, verbose,
+        )
 
-        result = {'loss': loss, 'acc': acc}
+        ckpt = {'loss': loss, 'acc': acc}
         preview = {'loss': loss, 'acc': acc}
-        return result, preview
+        return ckpt, preview
 
     def summarize(self, model_pths, severity=5):
         r"""Summarizes a list of models.
@@ -241,26 +233,32 @@ class CorruptionJob(BaseJob):
 
 if __name__=='__main__':
     parser = job_parser()
-    parser.add_argument('--store_dir', default='store')
-    parser.add_argument('--datasets_dir', default='datasets')
+    parser.add_argument('--store-dir', default='store')
+    parser.add_argument('--datasets-dir', default='datasets')
     parser.add_argument('--device', default=DEVICE)
-    parser.add_argument('--batch_size', default=BATCH_SIZE, type=int)
-    parser.add_argument('--worker_num', default=WORKER_NUM, type=int)
-    args = parser.parse_args()
+    parser.add_argument('--batch-size', default=BATCH_SIZE, type=int)
+    parser.add_argument('--spec-path', default='store/c-tests/spec.json')
+    args, _ = parser.parse_known_args()
 
-    if args.spec_pth is None:
-        export_dir = os.path.join(args.store_dir, 'models', 'exported')
-        assert os.path.exists(export_dir), "directory of exported models not found"
-        search_spec = {
-            'model_pth': [os.path.join(export_dir, f) for f in os.listdir(export_dir) if f.endswith('.pt')],
-            'corruption': CORRUPTIONS,
-            'severity': SEVERITIES,
-            }
-    else:
-        with open(args.spec_pth, 'rb') as f:
-            search_spec = pickle.load(f)
-
+    time.sleep(random.random()*args.max_wait)
     job = CorruptionJob(
-        args.store_dir, args.datasets_dir, args.device, args.batch_size, args.worker_num
-        )
-    job.random_search(search_spec, args.process_num, args.max_wait, args.tolerance)
+        f'{args.store_dir}/c-tests', args.datasets_dir, args.device, args.batch_size,
+    )
+
+    if os.path.exists(args.spec_path):
+        with open(args.spec.path, 'r') as f:
+            search_spec = json.load(f)
+    else:
+        search_spec = {}
+    if search_spec.get('model-path') is None:
+        search_spec['model-path'] = [
+            f'{args.store_dir}/exported/{f}' for f in os.listdir(f'{args.store_dir}/exported') if f.endswith('.pt')
+        ]
+    if search_spec.get('corruption') is None:
+        search_spec['corruption'] = CORRUPTIONS
+    if search_spec.get('severity') is None:
+        search_spec['severity'] = SEVERITIES
+    print(search_spec)
+    job.grid_search(
+        search_spec, num_works=args.num_works, patience=args.patience,
+    )
