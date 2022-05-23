@@ -246,7 +246,7 @@ if __name__=='__main__':
     )
 
     try:
-        with open(f'{args.store_dir}/{args.spec.path}', 'r') as f:
+        with open(f'{args.store_dir}/{args.spec_path}', 'r') as f:
             search_spec = json.load(f)
     except:
         search_spec = {}
