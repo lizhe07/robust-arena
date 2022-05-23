@@ -135,15 +135,11 @@ class CorruptionJob(BaseJob):
         # load model
         saved = torch.load(config['model_path'])
         model = saved['model']
-        if verbose>0:
-            print("Model loaded.")
 
         # evaluate on common corruption dataset
         dataset = self.prepare_dataset(
             saved['task'], config['corruption'], config['severity'],
         )
-        if verbose>0:
-            print("Dataset prepared.")
         loss, acc = evaluate(
             model, dataset, self.batch_size, self.device, verbose,
         )
@@ -258,7 +254,6 @@ if __name__=='__main__':
         search_spec['corruption'] = CORRUPTIONS
     if search_spec.get('severity') is None:
         search_spec['severity'] = SEVERITIES
-    print(search_spec)
     job.grid_search(
         search_spec, num_works=args.num_works, patience=args.patience,
     )
