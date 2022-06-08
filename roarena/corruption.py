@@ -229,7 +229,7 @@ class CorruptionJob(BaseJob):
             )
             h.errorbar.get_children()[0].set_edgecolor(np.array(color)*0.8+0.2)
             bars.append(h)
-        ax.legend(bars, legends)
+        ax.legend(bars, legends, fontsize=12)
         ylim = max(max(accs[i].values()) for i in range(num_groups))*100
         ylim = -(-ylim//10)*10
         ax.set_xticks(xticks)
