@@ -169,12 +169,12 @@ class EinMonJob(BaseJob):
         preview = {}
         return ckpt, preview
 
-    def summarize(self, model_pths, alphas):
+    def summarize(self, model_paths, alphas):
         r"""Summarizes a list of models.
 
         Args
         ----
-        model_pths: list
+        model_paths: list
             A list of model paths, each of which can be loaded by `torch.load`.
         alphas: list
             The normalized mixing frequencies.
@@ -186,22 +186,29 @@ class EinMonJob(BaseJob):
             containing testing accuracies of each model.
 
         """
-        accs_low, accs_high = {}, {}
-        for alpha in alphas:
-            accs_low[alpha] = []
-            accs_high[alpha] = []
-            for model_pth in model_pths:
+        accs_low_mean, accs_low_std = [], []
+        accs_high_mean, accs_high_std = [], []
+        for model_path in model_paths:
+            _accs_low_mean, _accs_low_std = [], []
+            _accs_high_mean, _accs_high_std = [], []
+            for alpha in alphas:
+                accs_low, accs_high = [], []
                 cond = {
-                    'model_pth': model_pth,
-                    'alpha': alpha,
-                    }
-                for key, _ in self.conditioned(cond):
-                    result = self.results[key]
-                    accs_low[alpha].append(result['acc_low'])
-                    accs_high[alpha].append(result['acc_high'])
-            accs_low[alpha] = np.array(accs_low[alpha])
-            accs_high[alpha] = np.array(accs_high[alpha])
-        return accs_low, accs_high
+                    'model_path': model_path, 'alpha': alpha,
+                }
+                for key in self.completed(cond=cond):
+                    ckpt = self.ckpts[key]
+                    accs_low.append(ckpt['acc_low'])
+                    accs_high.append(ckpt['acc_high'])
+                _accs_low_mean.append(np.mean(accs_low))
+                _accs_low_std.append(np.std(accs_low))
+                _accs_high_mean.append(np.mean(accs_high))
+                _accs_high_std.append(np.std(accs_high))
+            accs_low_mean.append(np.array(_accs_low_mean))
+            accs_low_std.append(np.array(_accs_low_std))
+            accs_high_mean.append(np.array(_accs_high_mean))
+            accs_high_std.append(np.array(_accs_high_std))
+        return accs_low_mean, accs_low_std, accs_high_mean, accs_high_std
 
     def plot_comparison(self, ax, groups, accs_low, accs_high, alphas):
         r"""Plots comparison of groups.
