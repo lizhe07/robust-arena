@@ -16,7 +16,7 @@ IMG_SIZES = {
     'CIFAR10': 3*32*32,
     'CIFAR100': 3*32*32,
     'ImageNet': 3*224*224,
-    }
+}
 EPS_NUM = 100
 OVERSHOOTS = np.linspace(0, 4, 9)
 
@@ -180,7 +180,7 @@ class AttackJob(BaseJob):
 
         # load checkpoint
         try:
-            epoch, ckpt = self.load_ckpt(config)
+            epoch, ckpt, _ = self.load_ckpt(config)
             if verbose>0:
                 print(f"Checkpoint (epoch {epoch}) loaded successfully.")
         except:
@@ -232,9 +232,12 @@ class AttackJob(BaseJob):
             advs_bb, successes_bb = [], []
             for overshoot in OVERSHOOTS:
                 criterion.overshoot = overshoot
-                starting_points = self.dataset_attack(
-                    model, dataset, criterion,
-                ).to(self.device)
+                if successes_pgd[-1]:
+                    starting_points = torch.tensor(advs_pgd[-1][None], dtype=torch.float, device=self.device)
+                else:
+                    starting_points = self.dataset_attack(
+                        model, dataset, criterion,
+                    ).to(self.device)
                 _, advs, successes = attack(fmodel, images, criterion, epsilons=None, starting_points=starting_points)
                 advs_bb.append(advs)
                 successes_bb.append(successes)
