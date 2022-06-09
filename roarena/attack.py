@@ -300,6 +300,80 @@ class AttackJob(BaseJob):
         ])
         return ckpt, preview
 
+    def best_attack(self,
+        model_path, metric, targeted, shuffle_mode, shuffle_tag, sample_idx,
+        min_probs=None, max_dists=None, return_advs=False,
+    ):
+        assert min_probs is None or max_dists is None
+        best_idxs, min_dists, max_probs = [], [], []
+        attack_types = [] # 0 for PGD, 1 for BB
+        config = {
+            'model_path': model_path,
+            'metric': metric, 'targeted': targeted,
+            'shuffle_mode': shuffle_mode, 'shuffle_tag': shuffle_tag,
+            'sample_idx': sample_idx,
+        }
+        key = self.configs.add(config)
+        assert self.stats[key]['epoch']>0, "No completed attacks found."
+        preview = self.previews[key]
+
+        if min_probs is not None: # find minimal attack with at least min_prob output
+            best_idx, min_dist, attack_type = None, np.inf, None
+            for min_prob in min_probs:
+                idxs, = (preview['successes_pgd']&(preview['probs_pgd']>=min_prob)).nonzero()
+                if len(idxs)>0:
+                    idx = idxs[np.argmin(preview['dists_pgd'][idxs])]
+                    if preview['dists_pgd'][idx]<min_dist:
+                        best_idx = idx
+                        min_dist = preview['dists_pgd'][idx]
+                        attack_type = 0
+                idxs, = (preview['successes_bb']&(preview['probs_bb']>=min_prob)).nonzero()
+                if len(idxs)>0:
+                    idx = idxs[np.argmin(preview['dists_bb'][idxs])]
+                    if preview['dists_bb'][idx]<min_dist:
+                        best_idx = idx
+                        min_dist = preview['dists_bb'][idx]
+                        attack_type = 1
+                best_idxs.append(best_idx)
+                min_dists.append(min_dist)
+                attack_types.append(attack_type)
+        if max_dists is not None: # find strongest attack with given attack budget
+            best_idx, max_prob, attack_type = None, 0, None
+            for max_dist in max_dists:
+                idxs, = (preview['successes_pgd']&(preview['dists_pgd']<=max_dist)).nonzero()
+                if len(idxs)>0:
+                    idx = idxs[np.argmax(preview['probs_pgd'][idxs])]
+                    if preview['probs_pgd'][idx]>max_prob:
+                        best_idx = idx
+                        max_prob = preview['probs_pgd'][idx]
+                        attack_type = 0
+                idxs, = (preview['successes_bb']&(preview['dists_bb']<=max_dist)).nonzero()
+                if len(idxs)>0:
+                    idx = idxs[np.argmax(preview['probs_bb'][idxs])]
+                    if preview['probs_bb'][idx]>max_prob:
+                        best_idx = idx
+                        max_prob = preview['probs_bb'][idx]
+                        attack_type = 1
+                best_idxs.append(best_idx)
+                max_probs.append(max_probs)
+                attack_types.append(attack_type)
+
+        if return_advs:
+            ckpt = self.ckpts[key]
+            advs = []
+            for best_idx, attack_type in zip(best_idxs, attack_types):
+                if best_idx is None:
+                    advs.append(None)
+                else:
+                    if attack_type==0:
+                        advs.append(ckpt['advs_pgd'][best_idx])
+                    if attack_type==1:
+                        advs.append(ckpt['advs_bb'][best_idx])
+        else:
+            advs = None
+        return min_dists, max_probs, advs
+
+
     def _best_attacks(
             self, model_pth, metric, targeted, sample_idxs,
             min_probs, max_dists, shuffle_mode, shuffle_tag,
