@@ -2,6 +2,8 @@ import os, argparse, pickle, random, time, torch, json
 from datetime import datetime
 import pytz
 import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
 import foolbox as fb
 
 from jarvis import BaseJob, Archive
@@ -302,7 +304,7 @@ class AttackJob(BaseJob):
 
     def best_attack(self,
         model_path, metric, targeted, shuffle_mode, shuffle_tag, sample_idx,
-        min_probs=None, max_dists=None, return_advs=False,
+        min_epoch=1, min_probs=None, max_dists=None, return_advs=False,
     ):
         assert min_probs is None or max_dists is None
         best_idxs, min_dists, max_probs = [], [], []
@@ -314,7 +316,7 @@ class AttackJob(BaseJob):
             'sample_idx': sample_idx,
         }
         key = self.configs.add(config)
-        assert self.stats[key]['epoch']>0, "No completed attacks found."
+        assert self.stats[key]['epoch']>=min_epoch, "No completed attacks found."
         preview = self.previews[key]
 
         if min_probs is not None: # find minimal attack with at least min_prob output
@@ -373,6 +375,71 @@ class AttackJob(BaseJob):
             advs = None
         return min_dists, max_probs, advs
 
+    def summarize(
+        self, model_paths, metric, targeted, shuffle_mode, shuffle_tag,
+        min_epoch=1, min_prob=0.1, num_advs=0,
+    ):
+        q_ticks = 1-np.logspace(0, -3, 50)
+        d_ticks = []
+        shared_idxs = None
+        for model_path in model_paths:
+            cond = {
+                'model_path': model_path,
+                'metric': metric, 'targeted': targeted,
+                'shuffle_mode': shuffle_mode, 'shuffle_tag': shuffle_tag,
+            }
+            min_dists, s_idxs = [], set()
+            for key in self.completed(min_epoch=min_epoch, cond=cond):
+                sample_idx = self.configs[key]['sample_idx']
+                _min_dist, _, _ = self.best_attack(
+                    model_path, metric, targeted, shuffle_mode, shuffle_tag, sample_idx,
+                    min_epoch=min_epoch, min_probs=[min_prob], return_advs=False,
+                )
+                min_dists.append(_min_dist[0])
+                s_idxs.add(sample_idx)
+            if shared_idxs is None:
+                shared_idxs = s_idxs
+            else:
+                shared_idxs &= s_idxs
+            d_ticks.append(np.quantile(min_dists, q_ticks))
+        if len(shared_idxs)<num_advs:
+            raise RuntimeError("Not enough shared images ({}) successfully attacked for all models.".format(len(shared_idxs)))
+        sample_idxs = random.sample(list(shared_idxs), num_advs)
+        advs = []
+        for model_path in model_paths:
+            _advs = []
+            for sample_idx in sample_idxs:
+                _, _, _adv = self.best_attack(
+                    model_path, metric, targeted, shuffle_mode, shuffle_tag, sample_idx,
+                    min_epoch=min_epoch, min_probs=[min_prob], return_advs=True,
+                )
+                _advs.append(_adv[0])
+            advs.append(_advs)
+        advs = np.array(advs)
+        return q_ticks, d_ticks, sample_idxs, advs
+
+    def plot_digest(self, q_ticks, d_ticks, ax=None, colors=None, legends=None):
+        num_groups = len(d_ticks)
+        if ax is None:
+            _, ax = plt.subplots(figsize=(4, 3))
+        if colors is None:
+            colors = [matplotlib.cm.get_cmap('tab10')(x)[:3] for x in np.linspace(0, 1, num_groups)]
+        if legends is None:
+            legends = [f'Group {i}' for i in range(num_groups)]
+
+        lines = []
+        for i in range(num_groups):
+            color = colors[i]
+            h, = ax.plot(d_ticks[i], q_ticks*100., color=color)
+            lines.append(h)
+        ax.legend(lines, legends, fontsize=12)
+        d_max = max(min(d_ticks[i][q_ticks>0.95]) for i in range(num_groups))
+        ax.set_xlim([-0.1*d_max, 1.1*d_max])
+        ax.set_xlabel(r'Attack size $\epsilon$')
+        ax.set_ylim([0, 105])
+        ax.set_ylabel('Success rate (%)')
+        ax.grid(axis='y')
+        return ax
 
     def _best_attacks(
             self, model_pth, metric, targeted, sample_idxs,
