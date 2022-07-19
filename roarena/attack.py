@@ -320,8 +320,8 @@ class AttackJob(BaseJob):
         preview = self.previews[key]
 
         if min_probs is not None: # find minimal attack with at least min_prob output
-            best_idx, min_dist, attack_type = None, np.inf, None
             for min_prob in min_probs:
+                best_idx, min_dist, attack_type = None, np.inf, None
                 idxs, = (preview['successes_pgd']&(preview['probs_pgd']>=min_prob)).nonzero()
                 if len(idxs)>0:
                     idx = idxs[np.argmin(preview['dists_pgd'][idxs])]
@@ -340,8 +340,8 @@ class AttackJob(BaseJob):
                 min_dists.append(min_dist)
                 attack_types.append(attack_type)
         if max_dists is not None: # find strongest attack with given attack budget
-            best_idx, max_prob, attack_type = None, 0, None
             for max_dist in max_dists:
+                best_idx, max_prob, attack_type = None, 0, None
                 idxs, = (preview['successes_pgd']&(preview['dists_pgd']<=max_dist)).nonzero()
                 if len(idxs)>0:
                     idx = idxs[np.argmax(preview['probs_pgd'][idxs])]
