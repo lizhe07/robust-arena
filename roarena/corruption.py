@@ -1,4 +1,4 @@
-import os, argparse, torch, time, random, json
+import os, yaml, torch
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -6,10 +6,9 @@ from torchvision.datasets import ImageFolder
 from torchvision import transforms
 from torchvision.transforms.functional import rgb_to_grayscale
 
-import jarvis
-from jarvis import BaseJob
-from jarvis.vision import evaluate, IMAGENET_TEST
-from jarvis.utils import job_parser
+from jarvis.config import Config, from_cli
+from jarvis.manager import Manager
+from jarvis.vision import evaluate, prepare_datasets, IMAGENET_TEST
 
 from . import DEVICE, BATCH_SIZE
 
@@ -21,74 +20,71 @@ CORRUPTIONS = [
 ]
 SEVERITIES = [1, 2, 3, 4, 5]
 
+cli_args = Config({
+    'store_dir': 'store',
+    'datasets_dir': 'datasets',
+    'model_path': [],
+    'corruption': CORRUPTIONS,
+    'severity': SEVERITIES,
+})
 
-class CorruptionJob(BaseJob):
+
+class CorruptionManager(Manager):
     r"""Tests model robustness on common corruptions.
 
     Only 'CIFAR10' and 'CIFAR100' are implemented now.
 
     Args
     ----
-    store_dir: str
+    store_dir:
         The directory for storing results. When `store_dir` is ``None``, no
         external storage is used.
-    datasets_dir: str
+    datasets_dir:
         The directory for vision datasets, must have 'CIFAR-10-C' and
         'CIFAR-100-C' as subdirectories.
-    device: str
+    device:
         The device for computation.
-    batch_size: int
+    batch_size:
         The batch size used during testing.
-    worker_num: int
-        The worker number for data loader.
 
     """
 
     def __init__(self,
-        store_dir, datasets_dir,
-        device=DEVICE, batch_size=BATCH_SIZE,
+        store_dir: str, datasets_dir: str,
+        device: str = DEVICE, batch_size: int = BATCH_SIZE,
         **kwargs,
     ):
-        super(CorruptionJob, self).__init__(store_dir=store_dir, **kwargs)
+        super(CorruptionManager, self).__init__(f'{store_dir}/c-results', **kwargs)
         self.datasets_dir = datasets_dir
         self.device = device if torch.cuda.is_available() else 'cpu'
         self.batch_size = batch_size
 
-    def strs2config(self, arg_strs):
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--model-path')
-        parser.add_argument('--corruption', choices=CORRUPTIONS)
-        parser.add_argument('--severity', default=5, type=int)
-        args, _ = parser.parse_known_args(arg_strs)
+    def get_config(self, config):
+        config = super(CorruptionManager, self).get_config(config)
+        if config.severity==0:
+            config.corruption = None
+        return config
 
-        assert args.model_path is not None
-        assert args.severity in SEVERITIES
-        return {
-            'model_path': args.model_path,
-            'corruption': args.corruption,
-            'severity': args.severity,
-        }
-
-    def prepare_dataset(self, task, corruption, severity):
+    def prepare_dataset(self, task: str, corruption: str, severity: int):
         r"""Returns common corruption testing set.
 
         Args
         ----
-        task: str
+        task:
             The task name.
-        corruption: str
+        corruption:
             The corruption name, can only be one of `CORRUPTIONS`.
-        severity: int
+        severity:
             The severity level, can only be 1 to 5.
 
         Returns
         -------
-        dataset: TensorDataset
+        dataset:
             The dataset containing corrupted images and class labels.
 
         """
         if severity==0:
-            dataset = jarvis.vision.prepare_datasets(task, self.datasets_dir)
+            dataset = prepare_datasets(task, self.datasets_dir)
             return dataset
 
         if task.endswith('-Gray'):
@@ -130,43 +126,44 @@ class CorruptionJob(BaseJob):
             )
         return dataset
 
-    def main(self, config, epoch=1, verbose=1):
-        if verbose>0:
-            print(config)
+    def setup(self, config):
+        super(CorruptionManager, self).setup(config)
 
         # load model
-        saved = torch.load(config['model_path'])
-        model = saved['model']
+        saved = torch.load(config.model_path)
+        self.model = saved['model']
         if torch.cuda.device_count()>1:
-            if verbose>0:
+            if self.verbose>0:
                 print("Using {} GPUs".format(torch.cuda.device_count()))
-            model = torch.nn.DataParallel(model)
+            self.model = torch.nn.DataParallel(self.model)
 
-        # evaluate on common corruption dataset
-        dataset = self.prepare_dataset(
-            saved['task'], config['corruption'], config['severity'],
+        # prepare common corruption dataset
+        self.dataset = self.prepare_dataset(
+            saved['task'], self.config.corruption, self.config.severity,
         )
+
+    def eval(self):
         loss, acc = evaluate(
-            model, dataset, self.batch_size, self.device, verbose,
+            self.model, self.dataset, self.batch_size,
+            device=self.device, verbose=self.verbose,
         )
 
-        ckpt = {'loss': loss, 'acc': acc}
-        preview = {'loss': loss, 'acc': acc}
-        return ckpt, preview
+        self.ckpt = {'loss': loss, 'acc': acc}
+        self.preview = {'loss': loss, 'acc': acc}
 
-    def summarize(self, model_paths, severity=5):
+    def summarize(self, model_paths: list[str], severity: int = 5) -> list[dict[str, list[float]]]:
         r"""Summarizes a list of models.
 
         Args
         ----
-        model_pths: list
+        model_paths:
             A list of model paths, each of which can be loaded by `torch.load`.
-        severity: int
+        severity:
             The severity level.
 
         Returns
         -------
-        accs: dict
+        accs:
             A dictionary with corruption names as keys. Each item is a numpy
             array, containing testing accuracies of each model.
 
@@ -176,18 +173,21 @@ class CorruptionJob(BaseJob):
             print(f"Fetching corruption robustness results for {model_path}...")
             _accs = {}
             for corruption in CORRUPTIONS:
-                config = {
+                config = self.get_config({
                     'model_path': model_path,
                     'corruption': corruption,
                     'severity': severity,
-                }
-                _, ckpt, _ = self.load_ckpt(config)
-                _accs[corruption] = ckpt['acc']
+                })
+                key = self.configs.get_key(config)
+                _accs[corruption] = self.previews[key]['acc']
             _accs['clean'] = torch.load(model_path)['acc']
             accs.append(_accs)
         return accs
 
-    def plot_full(self, accs, ax=None, bar_width=0.8, colors=None, legends=None):
+    def plot_full(self,
+        accs: list[dict[str, list[float]]],
+        ax=None, bar_width=0.8, colors=None, legends=None,
+    ):
         r"""Plots full comparison of groups of models.
 
         Classification accuracy for each type of corruption is compared. If one
@@ -196,15 +196,15 @@ class CorruptionJob(BaseJob):
 
         Args
         ----
-        accs: list[dict[str, Union[float, list[float]]]]
+        accs:
             Model(s) performance for each corruption at a severity level.
         ax:
             Matplotlib axis for plotting.
-        bar_width: float
+        bar_width:
             Width parameter for bar plots, value in (0, 1).
-        colors: Optional[list[tuple[float]]]
+        colors:
             A list of RGB values, specifying colors for each group.
-        legends: list[str]
+        legends:
             Legends for each group.
 
         """
@@ -238,7 +238,10 @@ class CorruptionJob(BaseJob):
         ax.set_ylim([0, ylim])
         ax.grid(axis='y')
 
-    def plot_digest(self, accs, ax=None, bar_width=0.8, colors=None, legends=None):
+    def plot_digest(self,
+        accs: list[dict[str, list[float]]],
+        ax=None, bar_width=0.8, colors=None, legends=None,
+    ):
         r"""Plots digest comparison of groups of models.
 
         Classification accuracy for 'low', 'medium' and 'high' corruptions is
@@ -247,15 +250,15 @@ class CorruptionJob(BaseJob):
 
         Args
         ----
-        accs: list[dict[str, Union[float, list[float]]]]
+        accs:
             Model(s) performance for each corruption at a severity level.
         ax:
             Matplotlib axis for plotting.
-        bar_width: float
+        bar_width:
             Width parameter for bar plots, value in (0, 1).
-        colors: Optional[list[tuple[float]]]
+        colors:
             A list of RGB values, specifying colors for each group.
-        legends: list[str]
+        legends:
             Legends for each group.
 
         """
@@ -304,32 +307,21 @@ class CorruptionJob(BaseJob):
 
 
 if __name__=='__main__':
-    parser = job_parser()
-    parser.add_argument('--store-dir', default='store')
-    parser.add_argument('--datasets-dir', default='datasets')
-    parser.add_argument('--device', default=DEVICE)
-    parser.add_argument('--batch-size', default=BATCH_SIZE, type=int)
-    parser.add_argument('--spec-path', default='c-tests/spec.json')
-    args, _ = parser.parse_known_args()
+    cli_args.update(from_cli())
+    store_dir = cli_args.pop('store_dir')
+    datasets_dir = cli_args.pop('datasets_dir')
+    manager = CorruptionManager(store_dir, datasets_dir)
 
-    time.sleep(random.random()*args.max_wait)
-    job = CorruptionJob(
-        f'{args.store_dir}/c-tests', args.datasets_dir, args.device, args.batch_size,
-    )
-
-    try:
-        with open(f'{args.store_dir}/{args.spec_path}', 'r') as f:
-            search_spec = json.load(f)
-    except:
-        search_spec = {}
-    if search_spec.get('model-path') is None:
-        search_spec['model-path'] = [
-            f'{args.store_dir}/exported/{f}' for f in os.listdir(f'{args.store_dir}/exported') if f.endswith('.pt')
+    choices = {}
+    choices['model_path'] = cli_args.pop('model_path')
+    choices['corruption'] = cli_args.pop('corruption')
+    choices['severity'] = cli_args.pop('severity')
+    if isinstance(choices['model_path'], str):
+        with open(choices['model_path']) as f:
+            choices['model_path'] = yaml.safe_load(f)
+    elif len(choices['model_path'])==0:
+        choices['model_path'] = [
+            f'{store_dir}/exported/{f}' for f in os.listdir(f'{store_dir}/exported') if f.endswith('.pt')
         ]
-    if search_spec.get('corruption') is None:
-        search_spec['corruption'] = CORRUPTIONS
-    if search_spec.get('severity') is None:
-        search_spec['severity'] = SEVERITIES
-    job.grid_search(
-        search_spec, num_works=args.num_works, patience=args.patience,
-    )
+
+    manager.sweep(choices, num_epochs=0, **cli_args)
