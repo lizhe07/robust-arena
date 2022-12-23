@@ -149,7 +149,7 @@ class CorruptionManager(Manager):
         )
 
         self.ckpt = {'loss': loss, 'acc': acc}
-        self.preview = {'loss': loss, 'acc': acc}
+        self.preview = self.ckpt
 
     def summarize(self, model_paths: list[str], severity: int = 5) -> list[dict[str, list[float]]]:
         r"""Summarizes a list of models.
