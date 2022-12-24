@@ -150,16 +150,20 @@ class AttackManager(Manager):
         advs_bb, successes_bb = [], []
         for overshoot in OVERSHOOTS:
             self.criterion.overshoot = overshoot
-            if successes_pgd[-1]:
+            try:
                 starting_points = torch.tensor(advs_pgd[-1][None], dtype=torch.float, device=self.device)
-            else:
+                _, advs, successes = attack(
+                    self.fmodel, self.images, self.criterion,
+                    epsilons=None, starting_points=starting_points,
+                )
+            except:
                 starting_points = self.dataset_attack(
                     self.model, self.dataset, self.criterion,
                 ).to(self.device)
-            _, advs, successes = attack(
-                self.fmodel, self.images, self.criterion,
-                epsilons=None, starting_points=starting_points,
-            )
+                _, advs, successes = attack(
+                    self.fmodel, self.images, self.criterion,
+                    epsilons=None, starting_points=starting_points,
+                )
             advs_bb.append(advs)
             successes_bb.append(successes)
         advs_bb = torch.cat(advs_bb)
