@@ -117,6 +117,7 @@ class AttackManager(Manager):
         if self.config.metric=='LI':
             attack = fb.attacks.LinfProjectedGradientDescentAttack()
             eps_max = 0.5
+        self.criterion.overshoot = 0.
         advs_pgd, successes_pgd = [], []
         for eps in np.arange(1, EPS_NUM+1)/EPS_NUM*eps_max:
             _, advs, successes = attack(self.fmodel, self.images, self.criterion, epsilons=eps)
