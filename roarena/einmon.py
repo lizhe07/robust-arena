@@ -2,7 +2,6 @@ import os, yaml, torch
 import numpy as np
 from scipy.fft import fft2, ifft2
 
-# from jarvis import BaseJob
 from jarvis.utils import get_seed, set_seed
 from jarvis.config import Config, from_cli
 from jarvis.manager import Manager
